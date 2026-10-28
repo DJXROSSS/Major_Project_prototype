@@ -1,0 +1,1052 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CSE Placement Intelligence — Portal</title>
+  <meta name="description" content="CSE Student Placement Intelligence System — Trainer, Student, and Admin portals for placement readiness, skill assessments, and company eligibility matching." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    :root {
+      --bg-app:         #09090B;
+      --bg-sidebar:     #0C0D12;
+      --bg-card:        #111318;
+      --bg-secondary:   #181A22;
+      --border:         #272A35;
+      --border-subtle:  #1E2130;
+      --text-primary:   #FAFAFA;
+      --text-secondary: #A1A1AA;
+      --text-muted:     #71717A;
+      --accent:         #6366F1;
+      --accent-hover:   #4F46E5;
+      --accent-subtle:  rgba(99,102,241,0.10);
+      --success:        #10B981;
+      --success-subtle: rgba(16,185,129,0.10);
+      --warning:        #F59E0B;
+      --warning-subtle: rgba(245,158,11,0.10);
+      --error:          #F43F5E;
+      --error-subtle:   rgba(244,63,94,0.10);
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --sb-closed: 64px;
+      --sb-open:   232px;
+      --sb-dur:    200ms cubic-bezier(0.4,0,0.2,1);
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; background: var(--bg-app); color: var(--text-primary); font-family: 'Inter', system-ui, sans-serif; font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
+    #root { height: 100%; }
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+    /* ── Shell ── */
+    .shell { display: flex; height: 100vh; overflow: hidden; }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      position: fixed; left: 0; top: 0; bottom: 0; z-index: 50;
+      width: var(--sb-closed);
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border-subtle);
+      display: flex; flex-direction: column;
+      overflow: hidden;
+      transition: width var(--sb-dur);
+      box-shadow: 2px 0 20px rgba(0,0,0,.4);
+    }
+    .sidebar:hover, .sidebar.open { width: var(--sb-open); }
+
+    .sb-logo {
+      display: flex; align-items: center; gap: 10px;
+      padding: 13px 16px; border-bottom: 1px solid var(--border-subtle);
+      min-height: 56px; overflow: hidden; white-space: nowrap;
+    }
+    .sb-mark {
+      width: 32px; height: 32px; background: var(--accent); border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 12px; color: #fff; flex-shrink: 0; letter-spacing: -.5px;
+    }
+    .sb-name {
+      font-size: 12px; font-weight: 600; color: var(--text-primary);
+      line-height: 1.3; opacity: 0; transition: opacity var(--sb-dur); white-space: nowrap;
+    }
+    .sidebar:hover .sb-name, .sidebar.open .sb-name { opacity: 1; }
+
+    .sb-nav { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 0; }
+
+    .sb-section-lbl {
+      font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      color: var(--text-muted); padding: 8px 18px 3px;
+      white-space: nowrap; opacity: 0; transition: opacity var(--sb-dur);
+    }
+    .sidebar:hover .sb-section-lbl, .sidebar.open .sb-section-lbl { opacity: 1; }
+
+    .sb-item {
+      display: flex; align-items: center; gap: 9px;
+      padding: 8px 14px; cursor: pointer;
+      background: none; border: none; width: 100%; text-align: left;
+      color: var(--text-secondary); font-size: 13px; font-family: inherit;
+      transition: background 120ms, color 120ms; position: relative; overflow: hidden; white-space: nowrap;
+    }
+    .sb-item:hover { background: rgba(255,255,255,.04); color: var(--text-primary); }
+    .sb-item.active { background: var(--accent-subtle); color: var(--accent); }
+    .sb-item-icon { width: 34px; height: 32px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .sb-item-lbl { opacity: 0; transition: opacity var(--sb-dur); font-weight: 500; }
+    .sidebar:hover .sb-item-lbl, .sidebar.open .sb-item-lbl { opacity: 1; }
+    .sb-bar { position: absolute; left: 0; top: 5px; bottom: 5px; width: 3px; background: var(--accent); border-radius: 0 3px 3px 0; opacity: 0; }
+    .sb-item.active .sb-bar { opacity: 1; }
+
+    .sb-footer { border-top: 1px solid var(--border-subtle); padding: 6px 0; }
+
+    /* Tooltip */
+    .tt-wrap { position: relative; }
+    .tt { position: absolute; left: calc(100% + 10px); top: 50%; transform: translateY(-50%);
+      background: #1c1f2e; color: var(--text-primary); font-size: 12px; font-weight: 500;
+      padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+      white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity 100ms; z-index: 200; }
+    .sidebar:not(:hover):not(.open) .tt-wrap:hover .tt { opacity: 1; }
+
+    /* ── Main ── */
+    .main { flex: 1; margin-left: var(--sb-closed); display: flex; flex-direction: column; overflow: hidden; }
+
+    /* ── Topbar ── */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 22px; height: 54px; border-bottom: 1px solid var(--border-subtle);
+      background: var(--bg-app); flex-shrink: 0; gap: 14px;
+    }
+    .breadcrumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-muted); }
+    .breadcrumb .cur { color: var(--text-primary); font-weight: 500; }
+    .breadcrumb .sep { color: var(--border); }
+    .status-pill {
+      display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted);
+      background: var(--bg-card); border: 1px solid var(--border); padding: 4px 10px; border-radius: 99px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .dot.on  { background: var(--success); box-shadow: 0 0 6px var(--success); }
+    .dot.off { background: var(--warning); }
+
+    /* Mobile */
+    .mob-btn {
+      display: none; align-items: center; justify-content: center;
+      width: 34px; height: 34px; background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-md); cursor: pointer; color: var(--text-secondary);
+    }
+    .sb-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40; }
+    @media (max-width: 768px) {
+      .sidebar { transform: translateX(-100%); transition: transform var(--sb-dur), width var(--sb-dur); }
+      .sidebar.open { transform: translateX(0); width: var(--sb-open); }
+      .sb-overlay.show { display: block; }
+      .main { margin-left: 0; }
+      .mob-btn { display: flex; }
+    }
+
+    /* ── Page ── */
+    .page { flex: 1; overflow-y: auto; padding: 22px 24px; }
+    .page-hdr { margin-bottom: 18px; }
+    .page-title { font-size: 20px; font-weight: 600; letter-spacing: -.3px; }
+    .page-sub { font-size: 13px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Card ── */
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px 20px; }
+    .card-hdr { padding: 14px 18px 12px; border-bottom: 1px solid var(--border-subtle); }
+    .card-title { font-size: 14px; font-weight: 600; }
+    .card-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+    /* ── Stat ── */
+    .stat { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px 18px; }
+    .stat-lbl { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); margin-bottom: 7px; }
+    .stat-val { font-size: 26px; font-weight: 700; line-height: 1; letter-spacing: -1px; }
+    .stat-note { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+
+    /* ── Table ── */
+    .tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tbl thead th { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); padding: 9px 13px; text-align: left; border-bottom: 1px solid var(--border); }
+    .tbl tbody tr { border-bottom: 1px solid var(--border-subtle); transition: background 100ms; }
+    .tbl tbody tr:last-child { border-bottom: none; }
+    .tbl tbody tr:hover { background: rgba(255,255,255,.025); }
+    .tbl tbody tr.sel { background: var(--accent-subtle); }
+    .tbl tbody td { padding: 10px 13px; vertical-align: middle; }
+
+    /* ── Badge ── */
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; }
+    .b-ok  { background: var(--success-subtle); color: var(--success); border: 1px solid rgba(16,185,129,.2); }
+    .b-err { background: var(--error-subtle);   color: var(--error);   border: 1px solid rgba(244,63,94,.2); }
+    .b-wrn { background: var(--warning-subtle); color: var(--warning); border: 1px solid rgba(245,158,11,.2); }
+    .b-acc { background: var(--accent-subtle);  color: var(--accent);  border: 1px solid rgba(99,102,241,.2); }
+    .b-neu { background: var(--bg-secondary);   color: var(--text-secondary); border: 1px solid var(--border); }
+
+    /* ── Progress ── */
+    .prog-track { width: 100%; height: 5px; background: var(--bg-secondary); border-radius: 99px; overflow: hidden; }
+    .prog-bar   { height: 100%; border-radius: 99px; transition: width 400ms ease; }
+    .pg  { background: var(--success); }
+    .pa  { background: var(--warning); }
+    .pr  { background: var(--error); }
+
+    /* ── Form ── */
+    .lbl { display: block; font-size: 12px; font-weight: 500; color: var(--text-secondary); margin-bottom: 5px; }
+    .inp, .sel {
+      width: 100%; background: var(--bg-secondary); border: 1px solid var(--border);
+      border-radius: var(--radius-md); padding: 8px 11px; font-size: 13px;
+      color: var(--text-primary); font-family: inherit; outline: none; transition: border-color 120ms;
+    }
+    .inp::placeholder { color: var(--text-muted); }
+    .inp:focus, .sel:focus { border-color: var(--accent); }
+    .sel { cursor: pointer; }
+    option { background: #1c1f2e; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; cursor: pointer; border: none; font-family: inherit; transition: background 120ms; white-space: nowrap; }
+    .btn-p { background: var(--accent);   color: #fff; }
+    .btn-p:hover { background: var(--accent-hover); }
+    .btn-s { background: var(--bg-secondary); color: var(--text-primary); border: 1px solid var(--border); }
+    .btn-s:hover { background: #212433; }
+    .btn-g { background: var(--success); color: #fff; }
+    .btn-g:hover { background: #0ea572; }
+
+    /* ── Misc ── */
+    .divider { height: 1px; background: var(--border-subtle); margin: 18px 0; }
+    .code-blk { background: var(--bg-app); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: 9px 11px; font-family: 'SFMono-Regular',Consolas,monospace; font-size: 11px; color: var(--text-muted); overflow-x: auto; line-height: 1.6; }
+    .coll-btn { display: flex; align-items: center; gap: 5px; cursor: pointer; font-size: 11px; font-weight: 500; color: var(--text-muted); background: none; border: none; font-family: inherit; padding: 3px 0; transition: color 120ms; }
+    .coll-btn:hover { color: var(--text-secondary); }
+    .eval-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; }
+    .skill-row { display: flex; align-items: center; justify-content: space-between; padding: 9px 16px; border-bottom: 1px solid var(--border-subtle); }
+    .skill-row:last-child { border-bottom: none; }
+    .import-log { display: flex; justify-content: space-between; align-items: center; padding: 9px 11px; background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); font-size: 12px; }
+    .config-box { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 13px 15px; }
+
+    .g2 { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; }
+    .g3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
+    .g4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    .g5 { display: grid; grid-template-columns: repeat(5,1fr); gap: 10px; }
+    @media(max-width:960px){ .g3,.g4,.g5{grid-template-columns:repeat(2,1fr);} }
+    @media(max-width:600px){ .g2,.g3,.g4,.g5{grid-template-columns:1fr;} }
+
+    .sp2>*+* { margin-top: 8px; }
+    .sp3>*+* { margin-top: 12px; }
+    .sp4>*+* { margin-top: 16px; }
+
+    @media(prefers-reduced-motion:reduce){ *,*::before,*::after{transition:none!important;animation:none!important;} }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+const API_BASE = "http://localhost:8080/api";
+
+const DEMO = {
+  taxonomy: [
+    { skill_id:1, skill_name:"DSA",           domain_category:"Programming & Problem Solving" },
+    { skill_id:2, skill_name:"OOPS",          domain_category:"Programming & Problem Solving" },
+    { skill_id:3, skill_name:"Java",          domain_category:"Software Development" },
+    { skill_id:4, skill_name:"Spring Boot",   domain_category:"Software Development" },
+    { skill_id:5, skill_name:"DBMS",          domain_category:"Core Computer Science" },
+    { skill_id:6, skill_name:"OS",            domain_category:"Core Computer Science" },
+    { skill_id:7, skill_name:"CN",            domain_category:"Core Computer Science" },
+    { skill_id:8, skill_name:"Communication", domain_category:"Employability & Soft Skills" }
+  ],
+  dashboard: {
+    totalStudents:5, placementReadyCount:3, notPlacementReadyCount:2,
+    students:[
+      { student_id:2, roll_no:"CSE22002", full_name:"Riya Patel",   cgpa:8.9,  readiness_status:"PR",  overall_avg:86.0, persona_badges:'["All-Rounder","Core CS Strong"]' },
+      { student_id:4, roll_no:"CSE22004", full_name:"Sneha Iyer",   cgpa:8.1,  readiness_status:"PR",  overall_avg:79.0, persona_badges:'["Development Strong","Communication Strong"]' },
+      { student_id:1, roll_no:"CSE22001", full_name:"Advay Sharma", cgpa:8.45, readiness_status:"PR",  overall_avg:77.5, persona_badges:'["DSA Strong","Development Strong"]' },
+      { student_id:5, roll_no:"CSE22005", full_name:"Kabir Verma",  cgpa:7.65, readiness_status:"NPR", overall_avg:68.1, persona_badges:'["DSA Strong","Needs Targeted Training"]' },
+      { student_id:3, roll_no:"CSE22003", full_name:"Aarav Mehta",  cgpa:7.2,  readiness_status:"NPR", overall_avg:52.9, persona_badges:'["Needs Targeted Training"]' }
+    ],
+    importBatches:[
+      { batch_id:1, event_type:"EXAM", event_title:"Baseline Diagnostic Assessment", original_filename:"baseline_assessment.xlsx", total_rows_processed:5, uploaded_at:"2026-10-28 10:00:00" }
+    ]
+  }
+};
+
+function Icon({ name, size=16 }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current && window.lucide) {
+      ref.current.innerHTML = "";
+      const el = document.createElement("i");
+      el.setAttribute("data-lucide", name);
+      el.style.cssText = `width:${size}px;height:${size}px;display:block;`;
+      ref.current.appendChild(el);
+      window.lucide.createIcons({ nodes: [el] });
+    }
+  }, [name, size]);
+  return <span ref={ref} style={{ display:"inline-flex", alignItems:"center" }} />;
+}
+
+function Collapsible({ label, children }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div>
+      <button className="coll-btn" onClick={() => setOpen(!open)}>
+        <Icon name={open ? "chevron-down" : "chevron-right"} size={12} />
+        {label}
+      </button>
+      {open && <div style={{ marginTop:6 }}>{children}</div>}
+    </div>
+  );
+}
+
+function App() {
+  const [portal, setPortal]       = useState("TRAINER");
+  const [trTab,  setTrTab]        = useState("DASHBOARD");
+  const [connected, setConnected] = useState(false);
+  const [mobOpen, setMobOpen]     = useState(false);
+
+  const [taxonomy,   setTaxonomy]   = useState(DEMO.taxonomy);
+  const [dashboard,  setDashboard]  = useState(DEMO.dashboard);
+  const [selStudent, setSelStudent] = useState(1);
+  const [s360,       setS360]       = useState(null);
+  const [companies,  setCompanies]  = useState([]);
+  const [selRole,    setSelRole]    = useState(1);
+  const [match,      setMatch]      = useState(null);
+
+  const [file,     setFile]     = useState(null);
+  const [preview,  setPreview]  = useState(null);
+  const [evType,   setEvType]   = useState("EXAM");
+  const [evTitle,  setEvTitle]  = useState("Weekly Readiness Assessment");
+  const [rollCol,  setRollCol]  = useState("");
+  const [nameCol,  setNameCol]  = useState("");
+  const [strCol,   setStrCol]   = useState("");
+  const [wkCol,    setWkCol]    = useState("");
+  const [bxCol,    setBxCol]    = useState("");
+  const [skillMap, setSkillMap] = useState({});
+  const [upStatus, setUpStatus] = useState("");
+
+  const [newSkill,  setNewSkill]  = useState("");
+  const [newDomain, setNewDomain] = useState("Software Development");
+
+  const loadAll = async () => {
+    try {
+      const [tR, dR, cR] = await Promise.all([
+        fetch(`${API_BASE}/taxonomy`),
+        fetch(`${API_BASE}/dashboard/trainer`),
+        fetch(`${API_BASE}/companies`)
+      ]);
+      if (tR.ok && dR.ok) {
+        setTaxonomy(await tR.json());
+        setDashboard(await dR.json());
+        setCompanies(await cR.json());
+        setConnected(true);
+      }
+    } catch { setConnected(false); }
+  };
+
+  const load360 = async (id) => {
+    try {
+      const r = await fetch(`${API_BASE}/students/${id}/360`);
+      if (r.ok) { setS360(await r.json()); return; }
+    } catch {}
+    setS360({
+      student: { student_id:1, roll_no:"CSE22001", full_name:"Advay Sharma", email:"advay@college.edu", batch:"2022-2026", cgpa:8.45, readiness_status:"PR", persona_badges:'["DSA Strong","Development Strong"]' },
+      skillBreakdown: [
+        { skill_name:"DSA",           domain_category:"Programming & Problem Solving", avg_pct:88 },
+        { skill_name:"Java",          domain_category:"Software Development",          avg_pct:85 },
+        { skill_name:"OOPS",          domain_category:"Programming & Problem Solving", avg_pct:84 },
+        { skill_name:"Spring Boot",   domain_category:"Software Development",          avg_pct:82 },
+        { skill_name:"Communication", domain_category:"Employability & Soft Skills",   avg_pct:79 },
+        { skill_name:"CN",            domain_category:"Core Computer Science",         avg_pct:76 },
+        { skill_name:"OS",            domain_category:"Core Computer Science",         avg_pct:72 },
+        { skill_name:"DBMS",          domain_category:"Core Computer Science",         avg_pct:54 }
+      ],
+      strongAreas: ["DSA (88%)", "Java (85%)", "OOPS (84%)", "Spring Boot (82%)"],
+      weakAreas:   ["DBMS (54% — Needs indexing & SQL query practice)"],
+      evaluations: [
+        { record_id:1, event_title:"Baseline Diagnostic Assessment", event_type:"EXAM", overall_score_pct:78.5, strengths:"Strong graph & tree problem solving", weaknesses:"Needs deeper DBMS revision", behavior_remarks:"Attentive and proactive", raw_excel_row:'{"Roll_No":"CSE22001","DSA":88,"DBMS":54,"Java":85}', custom_attributes:'{"Attendance_Pct":"94%","Lab_Mentor":"Prof. Rao"}' }
+      ]
+    });
+  };
+
+  const loadMatch = async (id) => {
+    try {
+      const r = await fetch(`${API_BASE}/companies/${id}/match`);
+      if (r.ok) setMatch(await r.json());
+    } catch {}
+  };
+
+  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { load360(selStudent); }, [selStudent]);
+  useEffect(() => { if (connected && selRole) loadMatch(selRole); }, [connected, selRole]);
+
+  const onFileSelect = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    setFile(f); setUpStatus("Reading headers…");
+    const fd = new FormData(); fd.append("file", f);
+    try {
+      const r = await fetch(`${API_BASE}/import/preview-headers`, { method:"POST", body:fd });
+      const d = await r.json();
+      setPreview(d);
+      if (d.headers?.length > 0) setRollCol(d.headers[0]);
+      setUpStatus("");
+    } catch { setUpStatus("Backend offline — start Spring Boot on :8080 to parse Excel files live."); }
+  };
+
+  const onUpload = async () => {
+    if (!file || !rollCol) { alert("Select an Excel file and map the Roll Number column."); return; }
+    const cfg = { eventType:evType, eventTitle:evTitle, rollNoColumn:rollCol, nameColumn:nameCol, strengthsColumn:strCol, weaknessesColumn:wkCol, behaviorColumn:bxCol, skillMappings:skillMap };
+    const fd = new FormData(); fd.append("file", file); fd.append("mappingConfig", JSON.stringify(cfg));
+    setUpStatus("Importing rows & normalizing scores…");
+    try {
+      const r = await fetch(`${API_BASE}/import/upload-mapped`, { method:"POST", body:fd });
+      const res = await r.json();
+      setUpStatus(`✓ ${res.message}`);
+      loadAll(); load360(selStudent);
+    } catch { setUpStatus("Upload failed — ensure Spring Boot backend is running."); }
+  };
+
+  const onMapChange = (header, skillId, maxMarks=100) => {
+    setSkillMap(prev => {
+      const u = {...prev};
+      if (!skillId) delete u[header];
+      else u[header] = { skillId:Number(skillId), maxMarks:Number(maxMarks) };
+      return u;
+    });
+  };
+
+  const onAddSkill = async () => {
+    if (!newSkill.trim()) return;
+    try {
+      await fetch(`${API_BASE}/admin/taxonomy`, {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ skillName:newSkill, domainCategory:newDomain })
+      });
+      setNewSkill(""); loadAll();
+    } catch { alert("Start the Spring Boot backend to save skills to MySQL."); }
+  };
+
+  const bcs = {
+    TRAINER:{ root:"Trainer Portal", page: trTab==="DASHBOARD"?"Batch Dashboard":trTab==="EXCEL_UPLOAD"?"Excel Upload":"Company Matcher" },
+    STUDENT:{ root:"Student Portal", page:"My Progress" },
+    ADMIN:  { root:"Admin Portal",   page:"Skill Management" }
+  };
+  const bc = bcs[portal];
+
+  const SidebarItems = [
+    { id:"TRAINER", icon:"layout-dashboard", label:"Trainer Portal", type:"portal" },
+    { id:"STUDENT", icon:"graduation-cap",   label:"Student Portal", type:"portal" },
+    { id:"ADMIN",   icon:"shield",           label:"Admin Portal",   type:"portal" }
+  ];
+  const TrainerTabs = [
+    { id:"DASHBOARD",     icon:"bar-chart-3",     label:"Batch Dashboard" },
+    { id:"EXCEL_UPLOAD",  icon:"file-spreadsheet", label:"Excel Upload" },
+    { id:"COMPANY_MATCH", icon:"building-2",       label:"Company Matcher" }
+  ];
+
+  return (
+    <div className="shell">
+      <div className={`sb-overlay ${mobOpen?"show":""}`} onClick={() => setMobOpen(false)} />
+
+      {/* ── Sidebar ── */}
+      <aside className={`sidebar ${mobOpen?"open":""}`}>
+        <div className="sb-logo">
+          <div className="sb-mark">PI</div>
+          <div className="sb-name">Placement<br/>Intelligence</div>
+        </div>
+
+        <nav className="sb-nav">
+          <div className="sb-section-lbl">Portal</div>
+          {SidebarItems.map(item => (
+            <div key={item.id} className="tt-wrap">
+              <button
+                className={`sb-item ${portal===item.id?"active":""}`}
+                onClick={() => { setPortal(item.id); setMobOpen(false); }}
+                aria-label={item.label}
+              >
+                <div className="sb-bar" />
+                <div className="sb-item-icon"><Icon name={item.icon} size={17} /></div>
+                <span className="sb-item-lbl">{item.label}</span>
+              </button>
+              <span className="tt">{item.label}</span>
+            </div>
+          ))}
+
+          {portal==="TRAINER" && (
+            <>
+              <div style={{height:6}} />
+              <div className="sb-section-lbl">Trainer Sections</div>
+              {TrainerTabs.map(t => (
+                <div key={t.id} className="tt-wrap">
+                  <button
+                    className={`sb-item ${trTab===t.id?"active":""}`}
+                    onClick={() => { setTrTab(t.id); setMobOpen(false); }}
+                    aria-label={t.label}
+                  >
+                    <div className="sb-bar" />
+                    <div className="sb-item-icon"><Icon name={t.icon} size={16} /></div>
+                    <span className="sb-item-lbl">{t.label}</span>
+                  </button>
+                  <span className="tt">{t.label}</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {portal==="ADMIN" && (
+            <>
+              <div style={{height:6}} />
+              <div className="sb-section-lbl">Admin Sections</div>
+              <div className="tt-wrap">
+                <button className="sb-item active" aria-label="Skill Parameters">
+                  <div className="sb-bar" />
+                  <div className="sb-item-icon"><Icon name="sliders-horizontal" size={16} /></div>
+                  <span className="sb-item-lbl">Skill Parameters</span>
+                </button>
+                <span className="tt">Skill Parameters</span>
+              </div>
+            </>
+          )}
+        </nav>
+
+        <div className="sb-footer">
+          <div className="tt-wrap">
+            <div className="sb-item" style={{cursor:"default"}}>
+              <div className="sb-item-icon">
+                <div style={{ width:28, height:28, borderRadius:"50%", background:"linear-gradient(135deg,#6366f1,#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, color:"#fff" }}>
+                  {portal==="TRAINER"?"TR":portal==="STUDENT"?"ST":"AD"}
+                </div>
+              </div>
+              <div className="sb-item-lbl" style={{ lineHeight:1.3 }}>
+                <div style={{ fontSize:12, fontWeight:600 }}>{portal==="TRAINER"?"Trainer":portal==="STUDENT"?"Student":"Admin"}</div>
+                <div style={{ fontSize:11, color:"var(--text-muted)" }}>Active session</div>
+              </div>
+            </div>
+            <span className="tt">{portal} Session</span>
+          </div>
+        </div>
+      </aside>
+
+      {/* ── Main ── */}
+      <div className="main">
+        <header className="topbar">
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <button className="mob-btn" onClick={() => setMobOpen(true)} aria-label="Open menu">
+              <Icon name="menu" size={17} />
+            </button>
+            <nav className="breadcrumb">
+              <span>{bc.root}</span>
+              <span className="sep">/</span>
+              <span className="cur">{bc.page}</span>
+            </nav>
+          </div>
+          <div className="status-pill">
+            <span className={`dot ${connected?"on":"off"}`} />
+            <span>{connected?"Connected to backend":"Demo Mode"}</span>
+          </div>
+        </header>
+
+        <main className="page">
+
+          {/* ═══════════════ TRAINER ═══════════════ */}
+          {portal==="TRAINER" && (
+            <>
+              {/* Dashboard */}
+              {trTab==="DASHBOARD" && (
+                <div>
+                  <div className="page-hdr">
+                    <h1 className="page-title">Batch Dashboard</h1>
+                    <p className="page-sub">Placement readiness overview and student 360° drill-down</p>
+                  </div>
+
+                  {/* Stats */}
+                  <div className="g3" style={{marginBottom:14}}>
+                    <div className="stat">
+                      <div className="stat-lbl">Total Students</div>
+                      <div className="stat-val">{dashboard.totalStudents||dashboard.students.length}</div>
+                      <div className="stat-note">In active batch</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-lbl">Placement Ready</div>
+                      <div className="stat-val" style={{color:"var(--success)"}}>{dashboard.placementReadyCount}</div>
+                      <div className="stat-note">≥ 70% average score</div>
+                    </div>
+                    <div className="stat">
+                      <div className="stat-lbl">Needs Training</div>
+                      <div className="stat-val" style={{color:"var(--error)"}}>{dashboard.notPlacementReadyCount}</div>
+                      <div className="stat-note">Below placement threshold</div>
+                    </div>
+                  </div>
+
+                  {/* Table + import log */}
+                  <div style={{display:"grid", gridTemplateColumns:"1fr 264px", gap:12, marginBottom:14}}>
+                    <div className="card" style={{padding:0, overflow:"hidden"}}>
+                      <div className="card-hdr">
+                        <div className="card-title">Batch Leaderboard</div>
+                        <div className="card-desc">Click a row to view the 360° profile below</div>
+                      </div>
+                      <div style={{overflowX:"auto"}}>
+                        <table className="tbl">
+                          <thead>
+                            <tr>
+                              <th>Roll No</th><th>Student</th><th>CGPA</th>
+                              <th>Avg Score</th><th>Status</th><th>Persona Tags</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dashboard.students.map(s => {
+                              const bs = JSON.parse(s.persona_badges||"[]");
+                              return (
+                                <tr key={s.student_id} onClick={() => setSelStudent(s.student_id)}
+                                  className={selStudent===s.student_id?"sel":""} style={{cursor:"pointer"}}>
+                                  <td><span className="font-mono" style={{color:"var(--accent)",fontSize:12}}>{s.roll_no}</span></td>
+                                  <td>
+                                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                      <div style={{width:26,height:26,borderRadius:"50%",background:`hsl(${(s.student_id*73)%360},55%,30%)`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:700,color:"#fff",flexShrink:0}}>{s.full_name.charAt(0)}</div>
+                                      <span style={{fontWeight:600}}>{s.full_name}</span>
+                                    </div>
+                                  </td>
+                                  <td style={{fontVariantNumeric:"tabular-nums"}}>{s.cgpa}</td>
+                                  <td style={{fontWeight:600,fontVariantNumeric:"tabular-nums"}}>{s.overall_avg||0}%</td>
+                                  <td><span className={`badge ${s.readiness_status==="PR"?"b-ok":"b-err"}`}>{s.readiness_status}</span></td>
+                                  <td>
+                                    <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                                      {bs.map((b,i) => <span key={i} className="badge b-neu">{b}</span>)}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="card" style={{padding:0,overflow:"hidden"}}>
+                      <div className="card-hdr">
+                        <div className="card-title">Import Logs</div>
+                        <div className="card-desc">Excel batches processed</div>
+                      </div>
+                      <div style={{padding:10,display:"flex",flexDirection:"column",gap:7}}>
+                        {dashboard.importBatches.map(b => (
+                          <div key={b.batch_id} className="import-log">
+                            <div>
+                              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                                <span className="badge b-acc">{b.event_type}</span>
+                                <span style={{fontSize:12,fontWeight:500}}>{b.event_title}</span>
+                              </div>
+                              <div style={{fontSize:11,color:"var(--text-muted)",fontFamily:"monospace"}}>{b.original_filename}</div>
+                            </div>
+                            <div style={{textAlign:"right",flexShrink:0}}>
+                              <div style={{fontSize:14,fontWeight:700,color:"var(--success)"}}>{b.total_rows_processed}</div>
+                              <div style={{fontSize:10,color:"var(--text-muted)"}}>rows</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  {s360 && <Student360Card data={s360} />}
+                </div>
+              )}
+
+              {/* Excel Upload */}
+              {trTab==="EXCEL_UPLOAD" && (
+                <div>
+                  <div className="page-hdr">
+                    <h1 className="page-title">Excel Upload &amp; Column Mapper</h1>
+                    <p className="page-sub">Upload any exam or mock interview sheet, map columns to skills, and import into the database</p>
+                  </div>
+                  <div className="card sp3">
+                    <div style={{fontWeight:600,fontSize:14,marginBottom:12}}>Step 1 — Assessment Details &amp; File</div>
+                    <div className="g3">
+                      <div>
+                        <label className="lbl">Assessment Type</label>
+                        <select className="sel" value={evType} onChange={e => setEvType(e.target.value)}>
+                          <option value="EXAM">Daily / Weekly Exam</option>
+                          <option value="MOCK_INTERVIEW">Mock Interview Sheet</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="lbl">Event / Exam Title</label>
+                        <input className="inp" value={evTitle} onChange={e => setEvTitle(e.target.value)} placeholder="e.g. Week 4 DSA Assessment" />
+                      </div>
+                      <div>
+                        <label className="lbl">Select Excel File</label>
+                        <input type="file" accept=".xlsx,.xls,.csv" onChange={onFileSelect}
+                          style={{width:"100%",background:"var(--bg-secondary)",border:"1px solid var(--border)",borderRadius:"var(--radius-md)",padding:"7px 11px",fontSize:12,color:"var(--text-secondary)",fontFamily:"inherit",cursor:"pointer"}} />
+                      </div>
+                    </div>
+                    {upStatus && (
+                      <div style={{
+                        marginTop:12,padding:"9px 13px",
+                        background: upStatus.startsWith("✓")?"var(--success-subtle)":"rgba(99,102,241,.08)",
+                        border:`1px solid ${upStatus.startsWith("✓")?"rgba(16,185,129,.25)":"rgba(99,102,241,.25)"}`,
+                        borderRadius:"var(--radius-md)",fontSize:13,
+                        color: upStatus.startsWith("✓")?"var(--success)":"var(--text-secondary)"
+                      }}>{upStatus}</div>
+                    )}
+                  </div>
+
+                  {preview && (
+                    <div className="card sp3" style={{marginTop:12}}>
+                      <div style={{fontWeight:600,fontSize:14}}>Step 2 — Map Detected Columns</div>
+                      <div style={{fontSize:12,color:"var(--text-muted)",marginTop:2}}>{preview.headers.length} columns found in <strong style={{color:"var(--text-secondary)"}}>{preview.fileName}</strong></div>
+                      <div className="divider" />
+                      <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text-muted)",marginBottom:9}}>Standard Columns</div>
+                      <div className="g5" style={{marginBottom:18}}>
+                        {[
+                          {lbl:"Roll Number *", v:rollCol, set:setRollCol, req:true},
+                          {lbl:"Student Name",  v:nameCol, set:setNameCol},
+                          {lbl:"Strengths",     v:strCol,  set:setStrCol},
+                          {lbl:"Weaknesses",    v:wkCol,   set:setWkCol},
+                          {lbl:"Behavior",      v:bxCol,   set:setBxCol}
+                        ].map(({lbl,v,set,req}) => (
+                          <div key={lbl}>
+                            <label className="lbl">{lbl}</label>
+                            <select className="sel" value={v} onChange={e => set(e.target.value)}>
+                              {!req && <option value="">— Optional —</option>}
+                              {preview.headers.map(h => <option key={h} value={h}>{h}</option>)}
+                            </select>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text-muted)",marginBottom:6}}>Skill Score Columns</div>
+                      <div style={{fontSize:11,color:"var(--text-muted)",marginBottom:10}}>Unmapped columns are auto-saved in the custom JSON field.</div>
+                      <div className="g3">
+                        {preview.headers.map(h => (
+                          <div key={h} style={{background:"var(--bg-secondary)",border:"1px solid var(--border)",borderRadius:"var(--radius-md)",padding:"9px 11px",display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+                            <span style={{fontFamily:"monospace",fontSize:12,color:"var(--accent)",minWidth:0,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h}</span>
+                            <div style={{display:"flex",gap:5,alignItems:"center",flexShrink:0}}>
+                              <select onChange={e => onMapChange(h, e.target.value, skillMap[h]?.maxMarks||100)}
+                                style={{background:"var(--bg-app)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"3px 7px",fontSize:11,color:"var(--text-secondary)",fontFamily:"inherit"}}>
+                                <option value="">JSON</option>
+                                {taxonomy.map(sk => <option key={sk.skill_id} value={sk.skill_id}>→ {sk.skill_name}</option>)}
+                              </select>
+                              {skillMap[h] && (
+                                <input type="number" placeholder="Max" defaultValue={100}
+                                  onChange={e => onMapChange(h, skillMap[h].skillId, e.target.value)}
+                                  style={{width:48,background:"var(--bg-app)",border:"1px solid var(--border)",borderRadius:"var(--radius-sm)",padding:"3px 6px",fontSize:11,color:"var(--text-secondary)",fontFamily:"inherit"}} />
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="divider" />
+                      <button onClick={onUpload} className="btn btn-g">
+                        <Icon name="upload" size={14} />
+                        Import &amp; Update Student 360° Database
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Company Matcher */}
+              {trTab==="COMPANY_MATCH" && (
+                <div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:16}}>
+                    <div>
+                      <h1 className="page-title">Company Eligibility Matcher</h1>
+                      <p className="page-sub">Weighted skill profiles matched against company cutoffs</p>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:9}}>
+                      <label style={{fontSize:12,color:"var(--text-muted)",whiteSpace:"nowrap"}}>Company</label>
+                      <select className="sel" style={{minWidth:270}} value={selRole}
+                        onChange={e => { const id=Number(e.target.value); setSelRole(id); loadMatch(id); }}>
+                        {companies.length > 0 ? companies.map(c => (
+                          <option key={c.role_id} value={c.role_id}>{c.company_name} — {c.role_title} ({c.package_lpa} LPA)</option>
+                        )) : (
+                          <>
+                            <option value={1}>Infosys — Digital Specialist Engineer (DSA Focus)</option>
+                            <option value={2}>Cognizant — GenC Next (Java + Spring Boot Focus)</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+
+                  {match ? (
+                    <div>
+                      <Collapsible label="View active skill weights & cutoff configuration">
+                        <div className="config-box" style={{marginTop:8,marginBottom:12}}>
+                          <div className="g2">
+                            <div>
+                              <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text-muted)",marginBottom:6}}>Skill Weights</div>
+                              <div className="code-blk">{match.role.skill_weights}</div>
+                            </div>
+                            <div>
+                              <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text-muted)",marginBottom:6}}>Cutoff Thresholds</div>
+                              <div className="code-blk">{match.role.skill_cutoffs}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </Collapsible>
+
+                      <div className="card" style={{padding:0,overflow:"hidden"}}>
+                        <div style={{padding:"13px 18px 11px",borderBottom:"1px solid var(--border-subtle)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                          <div className="card-title">Candidate Rankings</div>
+                          <div style={{display:"flex",gap:7}}>
+                            <span className="badge b-ok">{match.candidates.filter(c=>c.eligible).length} Eligible</span>
+                            <span className="badge b-err">{match.candidates.filter(c=>!c.eligible).length} Below Cutoff</span>
+                          </div>
+                        </div>
+                        <div style={{overflowX:"auto"}}>
+                          <table className="tbl">
+                            <thead><tr>
+                              <th style={{width:48}}>Rank</th><th>Roll No</th><th>Student</th>
+                              <th>CGPA</th><th>Weighted Match</th><th>Eligibility</th><th>Notes / Shortfalls</th>
+                            </tr></thead>
+                            <tbody>
+                              {match.candidates.map((c,i) => (
+                                <tr key={c.student_id}>
+                                  <td><span style={{fontSize:12,fontWeight:600,color:"var(--text-muted)"}}>#{i+1}</span></td>
+                                  <td><span style={{fontFamily:"monospace",color:"var(--accent)",fontSize:12}}>{c.roll_no}</span></td>
+                                  <td style={{fontWeight:600}}>{c.full_name}</td>
+                                  <td style={{fontVariantNumeric:"tabular-nums"}}>{c.cgpa}</td>
+                                  <td>
+                                    <div style={{display:"flex",alignItems:"center",gap:8,minWidth:130}}>
+                                      <div className="prog-track" style={{flex:1}}>
+                                        <div className={`prog-bar ${c.matchPercentage>=75?"pg":c.matchPercentage>=65?"pa":"pr"}`} style={{width:`${Math.min(100,c.matchPercentage)}%`}} />
+                                      </div>
+                                      <span style={{fontSize:12,fontWeight:600,fontVariantNumeric:"tabular-nums",minWidth:36,textAlign:"right"}}>{c.matchPercentage}%</span>
+                                    </div>
+                                  </td>
+                                  <td><span className={`badge ${c.eligible?"b-ok":"b-err"}`}>{c.eligible?"Eligible":"Below Cutoff"}</span></td>
+                                  <td style={{fontSize:12,color:"var(--text-muted)",maxWidth:220}}>{c.shortfallNotes?.length>0?c.shortfallNotes.join(", "):"Meets all skill & CGPA criteria"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="card" style={{textAlign:"center",padding:"52px 20px"}}>
+                      <div style={{display:"flex",justifyContent:"center",marginBottom:12,color:"var(--text-muted)"}}><Icon name="server-off" size={34} /></div>
+                      <div style={{fontSize:14,fontWeight:500,color:"var(--text-secondary)",marginBottom:4}}>Backend not connected</div>
+                      <div className="card-desc">Start the Spring Boot backend on port 8080 to run live weighted company matching</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ═══════════════ STUDENT ═══════════════ */}
+          {portal==="STUDENT" && (
+            <div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18,flexWrap:"wrap",gap:12}}>
+                <div>
+                  <h1 className="page-title">My Progress &amp; Feedback</h1>
+                  <p className="page-sub">View exam scores, skill performance, and placement readiness</p>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:9}}>
+                  <label style={{fontSize:12,color:"var(--text-muted)"}}>Viewing as</label>
+                  <select className="sel" style={{minWidth:220}} value={selStudent} onChange={e => setSelStudent(Number(e.target.value))}>
+                    {dashboard.students.map(s => <option key={s.student_id} value={s.student_id}>{s.full_name} ({s.roll_no})</option>)}
+                  </select>
+                </div>
+              </div>
+              {s360 && <Student360Card data={s360} />}
+            </div>
+          )}
+
+          {/* ═══════════════ ADMIN ═══════════════ */}
+          {portal==="ADMIN" && (
+            <div>
+              <div className="page-hdr">
+                <h1 className="page-title">Skill &amp; Parameter Management</h1>
+                <p className="page-sub">Add dynamic skills — immediately available for column mapping without schema changes</p>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"340px 1fr",gap:16,alignItems:"start"}}>
+
+                <div className="card sp3">
+                  <div className="card-title" style={{marginBottom:3}}>Add Skill Parameter</div>
+                  <div className="card-desc" style={{marginBottom:14}}>New skills become immediately mappable in Excel uploads.</div>
+                  <div>
+                    <label className="lbl">Skill Name</label>
+                    <input className="inp" value={newSkill} onChange={e => setNewSkill(e.target.value)}
+                      placeholder="e.g. System Design, React, Docker"
+                      onKeyDown={e => e.key==="Enter" && onAddSkill()} />
+                  </div>
+                  <div style={{marginTop:10}}>
+                    <label className="lbl">Domain Category</label>
+                    <select className="sel" value={newDomain} onChange={e => setNewDomain(e.target.value)}>
+                      <option value="Programming & Problem Solving">Programming &amp; Problem Solving</option>
+                      <option value="Core Computer Science">Core Computer Science</option>
+                      <option value="Software Development">Software Development</option>
+                      <option value="Employability & Soft Skills">Employability &amp; Soft Skills</option>
+                    </select>
+                  </div>
+                  <button onClick={onAddSkill} className="btn btn-p" style={{marginTop:12,width:"100%",justifyContent:"center"}}>
+                    <Icon name="plus" size={14} />
+                    Add Skill Parameter
+                  </button>
+                </div>
+
+                <div className="card" style={{padding:0,overflow:"hidden"}}>
+                  <div style={{padding:"13px 18px 11px",borderBottom:"1px solid var(--border-subtle)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                    <div className="card-title">Active Skill Taxonomy</div>
+                    <span className="badge b-neu">{taxonomy.length} skills</span>
+                  </div>
+                  {(() => {
+                    const grouped = {};
+                    taxonomy.forEach(sk => { if (!grouped[sk.domain_category]) grouped[sk.domain_category]=[]; grouped[sk.domain_category].push(sk); });
+                    return Object.entries(grouped).map(([domain, skills]) => (
+                      <div key={domain}>
+                        <div style={{padding:"7px 18px",fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".06em",color:"var(--text-muted)",background:"var(--bg-app)",borderBottom:"1px solid var(--border-subtle)"}}>
+                          {domain}
+                        </div>
+                        {skills.map(sk => (
+                          <div key={sk.skill_id} className="skill-row">
+                            <div style={{display:"flex",alignItems:"center",gap:9}}>
+                              <div style={{width:6,height:6,borderRadius:"50%",background:"var(--accent)",flexShrink:0}} />
+                              <span style={{fontSize:13,fontWeight:500}}>{sk.skill_name}</span>
+                            </div>
+                            <span style={{fontSize:11,color:"var(--text-muted)"}}>#{sk.skill_id}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            </div>
+          )}
+
+        </main>
+      </div>
+    </div>
+  );
+}
+
+function Student360Card({ data }) {
+  const { student, skillBreakdown, strongAreas, weakAreas, evaluations } = data;
+  const badges = JSON.parse(student.persona_badges||"[]");
+  const grouped = {};
+  skillBreakdown.forEach(sk => { if (!grouped[sk.domain_category]) grouped[sk.domain_category]=[]; grouped[sk.domain_category].push(sk); });
+
+  return (
+    <div className="card">
+      {/* Profile header */}
+      <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",flexWrap:"wrap",gap:14,paddingBottom:16,borderBottom:"1px solid var(--border-subtle)",marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:13}}>
+          <div style={{width:42,height:42,borderRadius:"50%",background:"linear-gradient(135deg,#6366f1,#8b5cf6)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:700,color:"#fff",flexShrink:0}}>
+            {student.full_name.charAt(0)}
+          </div>
+          <div>
+            <div style={{display:"flex",alignItems:"center",gap:9,marginBottom:2}}>
+              <span style={{fontSize:15,fontWeight:600}}>{student.full_name}</span>
+              <span style={{fontFamily:"monospace",fontSize:12,color:"var(--accent)"}}>{student.roll_no}</span>
+            </div>
+            <div style={{fontSize:12,color:"var(--text-muted)",display:"flex",gap:11,flexWrap:"wrap"}}>
+              <span>{student.email}</span>
+              <span>Batch: {student.batch}</span>
+              <span>CGPA: <strong style={{color:"var(--text-secondary)"}}>{student.cgpa}</strong></span>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:6}}>
+              {badges.map((b,i) => <span key={i} className="badge b-neu">{b}</span>)}
+            </div>
+          </div>
+        </div>
+        <span className={`badge ${student.readiness_status==="PR"?"b-ok":"b-err"}`} style={{fontSize:12,padding:"5px 12px"}}>
+          {student.readiness_status==="PR"?"Placement Ready":"Not Placement Ready"}
+        </span>
+      </div>
+
+      {/* Skills + Summary */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 228px",gap:18,marginBottom:18}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text-muted)",marginBottom:13}}>Skill Performance</div>
+          <div className="sp4">
+            {Object.entries(grouped).map(([domain, skills]) => (
+              <div key={domain}>
+                <div style={{fontSize:11,fontWeight:600,color:"var(--text-muted)",marginBottom:7}}>{domain}</div>
+                <div className="sp2">
+                  {skills.map(sk => {
+                    const cls = sk.avg_pct>=75?"pg":sk.avg_pct>=65?"pa":"pr";
+                    const tc  = sk.avg_pct>=75?"var(--success)":sk.avg_pct>=65?"var(--warning)":"var(--error)";
+                    return (
+                      <div key={sk.skill_name} style={{display:"flex",alignItems:"center",gap:9}}>
+                        <div style={{width:76,fontSize:12,fontWeight:500,flexShrink:0}}>{sk.skill_name}</div>
+                        <div className="prog-track" style={{flex:1}}>
+                          <div className={`prog-bar ${cls}`} style={{width:`${Math.min(100,sk.avg_pct)}%`}} />
+                        </div>
+                        <div style={{width:34,fontSize:12,fontWeight:600,textAlign:"right",color:tc,fontVariantNumeric:"tabular-nums"}}>{sk.avg_pct}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+          <div style={{background:"var(--success-subtle)",border:"1px solid rgba(16,185,129,.18)",borderRadius:"var(--radius-lg)",padding:"13px 14px"}}>
+            <div style={{fontSize:12,fontWeight:600,color:"var(--success)",marginBottom:7,display:"flex",alignItems:"center",gap:5}}>
+              <Icon name="trending-up" size={13} />Strong Areas
+            </div>
+            {strongAreas.length>0
+              ? <ul style={{listStyle:"none",display:"flex",flexDirection:"column",gap:4}}>{strongAreas.map((s,i) => <li key={i} style={{fontSize:12,color:"#a7f3d0"}}>{s}</li>)}</ul>
+              : <p style={{fontSize:12,color:"var(--text-muted)"}}>Keep practising to unlock strong domains</p>}
+          </div>
+          <div style={{background:"var(--error-subtle)",border:"1px solid rgba(244,63,94,.18)",borderRadius:"var(--radius-lg)",padding:"13px 14px"}}>
+            <div style={{fontSize:12,fontWeight:600,color:"var(--error)",marginBottom:7,display:"flex",alignItems:"center",gap:5}}>
+              <Icon name="alert-triangle" size={13} />Needs Improvement
+            </div>
+            {weakAreas.length>0
+              ? <ul style={{listStyle:"none",display:"flex",flexDirection:"column",gap:4}}>{weakAreas.map((w,i) => <li key={i} style={{fontSize:12,color:"#fda4af"}}>{w}</li>)}</ul>
+              : <p style={{fontSize:12,color:"var(--text-muted)"}}>No critical weak areas flagged</p>}
+          </div>
+        </div>
+      </div>
+
+      {/* Assessment history */}
+      <div style={{borderTop:"1px solid var(--border-subtle)",paddingTop:16}}>
+        <div style={{fontSize:11,fontWeight:600,textTransform:"uppercase",letterSpacing:".05em",color:"var(--text-muted)",marginBottom:12}}>Assessment History</div>
+        <div className="sp3">
+          {evaluations.map(ev => (
+            <div key={ev.record_id} className="eval-card">
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10,flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:7}}>
+                  <span className={`badge ${ev.event_type==="EXAM"?"b-acc":"b-wrn"}`}>{ev.event_type}</span>
+                  <span style={{fontSize:13,fontWeight:600}}>{ev.event_title}</span>
+                </div>
+                {ev.overall_score_pct!=null
+                  ? <div style={{display:"flex",alignItems:"center",gap:5}}>
+                      <span style={{fontSize:11,color:"var(--text-muted)"}}>Score</span>
+                      <span style={{fontSize:14,fontWeight:700,fontVariantNumeric:"tabular-nums",color:ev.overall_score_pct>=75?"var(--success)":ev.overall_score_pct>=65?"var(--warning)":"var(--error)"}}>{ev.overall_score_pct}%</span>
+                    </div>
+                  : <span style={{fontSize:12,color:"var(--text-muted)"}}>Score unavailable</span>}
+              </div>
+              <div className="g3" style={{marginBottom:10}}>
+                {[
+                  {lbl:"Strengths",      val:ev.strengths,        c:"var(--success)"},
+                  {lbl:"Weaknesses",     val:ev.weaknesses,       c:"var(--error)"},
+                  {lbl:"Behavior Review",val:ev.behavior_remarks,  c:"var(--warning)"}
+                ].map(({lbl,val,c}) => (
+                  <div key={lbl}>
+                    <div style={{fontSize:11,fontWeight:600,color:c,marginBottom:3}}>{lbl}</div>
+                    <div style={{fontSize:12,color:"var(--text-secondary)",lineHeight:1.5}}>
+                      {val||<span style={{color:"var(--text-muted)",fontStyle:"italic"}}>Not recorded</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <Collapsible label="Raw imported data">
+                <div className="code-blk">
+                  <div><span style={{color:"var(--accent)"}}>custom_attributes</span>: {ev.custom_attributes}</div>
+                  <div style={{marginTop:3}}><span style={{color:"var(--text-muted)"}}>raw_excel_row</span>: {ev.raw_excel_row}</div>
+                </div>
+              </Collapsible>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
