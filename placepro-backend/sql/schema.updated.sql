@@ -5,7 +5,7 @@
 DO $$ BEGIN CREATE TYPE user_role AS ENUM ('ADMIN', 'TRAINER', 'STUDENT'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE readiness_status AS ENUM ('PR', 'NPR'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE TYPE skill_domain AS ENUM (
-    'Programming & Problem Solving',
+    'Programming/DSA',
     'Core Computer Science',
     'Software Development',
     'Employability & Soft Skills'

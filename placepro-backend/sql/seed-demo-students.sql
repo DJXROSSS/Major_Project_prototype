@@ -1,5 +1,7 @@
 -- PlacePro demo roster: four CSE batches, exactly 100 students per batch.
 -- Safe to re-run: existing students are preserved and only missing rows are added.
+-- Run seed-supplied-cse-rosters.sql first to use the supplied 2023–2027 and
+-- 2025–2029 rosters instead of generated placeholders for those batches.
 DO $$
 DECLARE
   batch_record RECORD;
