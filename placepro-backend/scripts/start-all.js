@@ -3,6 +3,8 @@ const path = require("path");
 const { logger } = require("../src/utils/logger");
 
 const root = path.resolve(__dirname, "..");
+require("dotenv").config({ path: path.join(root, ".env") });
+
 const servers = [
   "src/services/auth/server.js",
   "src/services/dashboard/server.js",
@@ -13,7 +15,7 @@ const servers = [
   "src/gateway/server.js",
 ];
 
-const children = servers.map((server) => fork(path.join(root, server), [], { stdio: "inherit" }));
+const children = servers.map((server) => fork(path.join(root, server), [], { stdio: "inherit", cwd: root }));
 let isShuttingDown = false;
 
 function shutdown(exitCode = 0) {

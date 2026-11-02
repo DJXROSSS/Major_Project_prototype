@@ -20,16 +20,6 @@ import type {
   Skill,
   TrainerFeedback,
 } from "@/types";
-import {
-  ASSESSMENTS,
-  BATCHES,
-  COMPANIES,
-  DEMO_ACCOUNTS,
-  FEEDBACK,
-  SKILLS,
-  STUDENT_BY_ID,
-  USERS,
-} from "./mock-data";
 import { api, ApiError } from "./api";
 import { logger } from "@/lib/logger";
 
@@ -56,6 +46,8 @@ interface AppState {
   importedSources: ImportedSource[];
   feedback: TrainerFeedback[];
   students: import("@/types").Student[];
+  isRefreshing: boolean;
+  dataError: string | null;
 
   /* actions */
   login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
@@ -97,14 +89,16 @@ export const useAppStore = create<AppState>((set) => ({
   sidebarPinned: true,
   uiDialog: null,
 
-  skills: SKILLS,
-  companies: COMPANIES,
-  users: USERS,
-  batches: BATCHES,
-  assessments: ASSESSMENTS,
+  skills: [],
+  companies: [],
+  users: [],
+  batches: [],
+  assessments: [],
   importedSources: [],
-  feedback: FEEDBACK,
-  students: Object.values(STUDENT_BY_ID),
+  feedback: [],
+  students: [],
+  isRefreshing: false,
+  dataError: null,
 
   login: async (email, password) => {
     try {
@@ -136,11 +130,12 @@ export const useAppStore = create<AppState>((set) => ({
   refreshData: async () => {
     const user = useAppStore.getState().user;
     if (!user) return;
+    set({ isRefreshing: true, dataError: null });
     try {
       if (user.role === "student") {
         const [student, assessmentResponse, feedback] = await Promise.all([api.myStudent(), api.myAssessments(), api.myFeedback()]);
         const assessmentItems = Array.isArray(assessmentResponse) ? assessmentResponse : (assessmentResponse as { items?: Assessment[] }).items ?? [];
-        set({ assessments: assessmentItems as Assessment[], feedback, students: [student] });
+        set({ assessments: assessmentItems as Assessment[], feedback, students: [student], isRefreshing: false });
         return;
       }
       const [studentsResponse, assessments, companies, batches, skills] = await Promise.all([
@@ -154,13 +149,16 @@ export const useAppStore = create<AppState>((set) => ({
       }));
       if (user.role === "admin") {
         const [users, auditResponse] = await Promise.all([api.users(), api.auditLogs()]);
-        set({ users, feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items });
+        set({ users, feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items, isRefreshing: false });
       } else {
-        set({ feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items });
+        set({ feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items, isRefreshing: false });
       }
       // Keep the call here so all authorised data sources are exercised; student-dependent views fetch details by id.
       void studentsResponse;
-    } catch (error) { logger.error("data.refresh_failed", error, { role: user.role }); }
+    } catch (error) {
+      logger.error("data.refresh_failed", error, { role: user.role });
+      set({ isRefreshing: false, dataError: error instanceof Error ? error.message : "Unable to load current data." });
+    }
   },
 
   navigate: (page, params) => {
@@ -205,7 +203,7 @@ export const useAppStore = create<AppState>((set) => ({
 
 export function getStudentSafely(studentId?: string) {
   if (!studentId) return undefined;
-  return STUDENT_BY_ID[studentId];
+  return useAppStore.getState().students.find((student) => student.id === studentId);
 }
 
 /** Breadcrumb labels for the current route, per role */

@@ -1,0 +1,16 @@
+{
+  "name": "placepro-prototype",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PlacePro Fullstack Prototype - Backend microservices and Next.js frontend",
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "dev:backend": "npm --prefix placepro-backend run dev",
+    "dev:frontend": "npm --prefix placepro-frontend run dev",
+    "build:backend": "npm --prefix placepro-backend run build",
+    "build:frontend": "npm --prefix placepro-frontend run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start:backend": "npm --prefix placepro-backend run start",
+    "start:frontend": "npm --prefix placepro-frontend run start"
+  }
+}

@@ -40,6 +40,8 @@ export interface Student {
   cgpa: number;
   /** skillId -> average score (0-100) */
   scores: Record<string, number>;
+  /** Backend-computed mean score for each skill domain. */
+  domainAverages?: Record<string, number>;
   average: number;
   prStatus: PRStatus;
   /** chronological average % across recent assessments */
@@ -135,11 +137,10 @@ export interface Batch {
 
 export interface AuditLog {
   id: string;
-  user: string;
+  actor: string;
   action: string;
   module: string;
   timestamp: string;
-  record: string;
   status: "success" | "warning" | "failed";
 }
 
