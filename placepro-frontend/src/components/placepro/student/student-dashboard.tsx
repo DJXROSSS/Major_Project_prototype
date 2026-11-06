@@ -25,13 +25,7 @@ import {
   YAxis,
 } from "recharts";
 import { useAppStore } from "@/lib/placepro/store";
-import {
-  DOMAIN_GROUPS,
-  SKILL_BY_ID,
-  STUDENT_BY_ID,
-  getAssessmentHistory,
-  studentDomainScore,
-} from "@/lib/placepro/mock-data";
+import { domainScores, skillEntries, skillName } from "@/lib/placepro/skill-taxonomy";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { ChartCard, EmptyState } from "@/components/placepro/shared/states";
 import { MiniBar, PRBadge, ScorePill } from "@/components/placepro/shared/badges";
@@ -51,6 +45,7 @@ const SKILL_GUIDANCE: Record<string, string> = {
   oops: "Refactor one past project around clean OOP principles",
   java: "Finish the collections module and redo its exercises",
   springboot: "Build a small REST CRUD service end to end",
+  spring_boot: "Build a small REST CRUD service end to end",
   comm: "Rehearse a two-minute self-introduction with a peer weekly",
   sysdesign: "Read and summarise one beginner design case study a week",
   aptitude: "Practice one timed reasoning set daily",
@@ -58,39 +53,79 @@ const SKILL_GUIDANCE: Record<string, string> = {
 
 const DATE_OPTS: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" };
 
+/* shared recharts styling */
+const axisTick = { fontSize: 12, fill: "#727C74" };
+const tooltipStyle = {
+  borderRadius: 10,
+  border: "1px solid #E4E9E4",
+  boxShadow: "0 4px 16px -8px rgba(32,41,35,0.16)",
+  fontSize: 13,
+  padding: "8px 12px",
+};
+
 export default function StudentDashboard() {
   const user = useAppStore((s) => s.user);
   const navigate = useAppStore((s) => s.navigate);
   const feedback = useAppStore((s) => s.feedback);
+  const students = useAppStore((s) => s.students);
+  const assessments = useAppStore((s) => s.assessments);
+  const skills = useAppStore((s) => s.skills);
+  const isRefreshing = useAppStore((s) => s.isRefreshing);
 
-  const student = user?.studentId ? STUDENT_BY_ID[user.studentId] : undefined;
+  const student = useMemo(() => {
+    if (!students.length) return undefined;
+    return students.find((s) => s.id === user?.studentId) ?? students[0];
+  }, [students, user?.studentId]);
 
   const data = useMemo(() => {
     if (!student) return null;
-    const history = getAssessmentHistory(student.id);
-    const byDate = [...history].sort((a, b) => b.date.localeCompare(a.date));
+
+    const byDate = [...assessments].sort((a, b) => b.date.localeCompare(a.date));
     const mostRecent = byDate[0];
-    const lastScore = student.trend[student.trend.length - 1] ?? student.average;
+    const recentResult = mostRecent?.results.find((r) => r.studentId === student.id);
+    const lastScore =
+      recentResult?.percentage ??
+      (student.trend && student.trend.length > 0
+        ? student.trend[student.trend.length - 1]
+        : student.average);
 
-    const skillEntries = Object.entries(student.scores);
-    const strong = skillEntries.filter(([, v]) => v >= 75).sort((a, b) => b[1] - a[1]);
-    const target = skillEntries.filter(([, v]) => v < 60).sort((a, b) => a[1] - b[1]);
+    const evaluatedEntries = skillEntries(student, skills);
+    const strong = evaluatedEntries.filter((s) => s.score >= 75).sort((a, b) => b.score - a.score);
+    const target = evaluatedEntries.filter((s) => s.score < 60).sort((a, b) => a.score - b.score);
 
-    const commIds = new Set(DOMAIN_GROUPS.find((g) => g.label === "Communication")?.skills ?? []);
-    const techVals = skillEntries.filter(([id]) => !commIds.has(id)).map(([, v]) => v);
-    const technical = techVals.length
-      ? Math.round((techVals.reduce((a, b) => a + b, 0) / techVals.length) * 10) / 10
-      : 0;
-    const communication = student.scores["comm"] ?? 0;
+    // Distinguish technical vs soft skills
+    const commSkill = evaluatedEntries.find(
+      (e) =>
+        e.id === "comm" ||
+        e.name.toLowerCase().includes("communication") ||
+        e.domain.toLowerCase().includes("soft")
+    );
+    const communication = commSkill ? commSkill.score : (student.scores["comm"] ?? 0);
 
-    const domainBars = DOMAIN_GROUPS.map((g) => ({
-      domain: g.label,
-      score: studentDomainScore(student, g.label),
+    const techEntries = evaluatedEntries.filter((e) => e !== commSkill);
+    const technical = techEntries.length
+      ? Math.round((techEntries.reduce((a, b) => a + b.score, 0) / techEntries.length) * 10) / 10
+      : student.average;
+
+    const domainBars = domainScores(student, skills).map((d) => ({
+      domain: d.domain,
+      score: d.score,
     }));
 
     const approved = feedback
       .filter((f) => f.studentId === student.id && f.approved)
       .sort((a, b) => b.date.localeCompare(a.date));
+
+    // Trend over time: use student.trend or build from historical assessments
+    let trendScores = student.trend ?? [];
+    if (!trendScores.length && byDate.length > 0) {
+      trendScores = [...byDate]
+        .reverse()
+        .flatMap((a) => {
+          const r = a.results.find((x) => x.studentId === student.id);
+          return r ? [r.percentage] : [];
+        });
+    }
 
     return {
       byDate,
@@ -102,8 +137,17 @@ export default function StudentDashboard() {
       communication,
       domainBars,
       approved,
+      trendScores,
     };
-  }, [student, feedback]);
+  }, [student, assessments, feedback, skills]);
+
+  if (isRefreshing && !student) {
+    return (
+      <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+        Loading your student dashboard…
+      </div>
+    );
+  }
 
   if (!student || !data) {
     return (
@@ -122,7 +166,7 @@ export default function StudentDashboard() {
     month: "long",
     year: "numeric",
   });
-  const trendData = student.trend.map((score, i) => ({ assessment: i + 1, score }));
+  const trendData = data.trendScores.map((score, i) => ({ assessment: i + 1, score }));
   const latestFeedback = data.approved[0];
   const recentAssessments = data.byDate.slice(0, 5);
   const gap = Math.abs(data.technical - data.communication).toFixed(1);
@@ -181,37 +225,47 @@ export default function StudentDashboard() {
       <section className="grid gap-4 lg:grid-cols-12">
         <ChartCard
           title="My performance over time"
-          description="Percentage score in every assessment, newest on the right"
+          description={
+            trendData.length > 0
+              ? "Percentage score in every assessment, newest on the right"
+              : "Historical results will appear here as assessments are completed"
+          }
           className="lg:col-span-5 pp-rise"
         >
           <div className="h-[240px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={trendData} margin={{ top: 6, right: 12, bottom: 0, left: -14 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" vertical={false} />
-                <XAxis dataKey="assessment" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
-                <YAxis domain={[30, 100]} tick={axisTick} axisLine={false} tickLine={false} />
-                <ReTooltip
-                  formatter={(v: number) => [`${v}%`, "Score"]}
-                  labelFormatter={(l: number) => `Assessment ${l}`}
-                  contentStyle={tooltipStyle}
-                />
-                <ReferenceLine
-                  y={60}
-                  stroke="#D99A36"
-                  strokeDasharray="4 4"
-                  label={{ value: "Target", position: "insideTopRight", fontSize: 11, fill: "#D99A36" }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="score"
-                  stroke="#245C45"
-                  strokeWidth={2.5}
-                  dot={{ r: 3.5, fill: "#245C45", strokeWidth: 0 }}
-                  activeDot={{ r: 5 }}
-                  animationDuration={700}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            {trendData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData} margin={{ top: 6, right: 12, bottom: 0, left: -14 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" vertical={false} />
+                  <XAxis dataKey="assessment" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
+                  <YAxis domain={[30, 100]} tick={axisTick} axisLine={false} tickLine={false} />
+                  <ReTooltip
+                    formatter={(v: number) => [`${v}%`, "Score"]}
+                    labelFormatter={(l: number) => `Assessment ${l}`}
+                    contentStyle={tooltipStyle}
+                  />
+                  <ReferenceLine
+                    y={60}
+                    stroke="#D99A36"
+                    strokeDasharray="4 4"
+                    label={{ value: "Target", position: "insideTopRight", fontSize: 11, fill: "#D99A36" }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="score"
+                    stroke="#245C45"
+                    strokeWidth={2.5}
+                    dot={{ r: 3.5, fill: "#245C45", strokeWidth: 0 }}
+                    activeDot={{ r: 5 }}
+                    animationDuration={700}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+                No historical assessment points available yet
+              </div>
+            )}
           </div>
         </ChartCard>
 
@@ -221,19 +275,25 @@ export default function StudentDashboard() {
           className="lg:col-span-4 pp-rise"
           bodyClassName="h-[240px] px-2 pb-0 pt-4"
         >
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data.domainBars} layout="vertical" margin={{ top: 0, right: 24, bottom: 0, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" horizontal={false} />
-              <XAxis type="number" domain={[0, 100]} tick={axisTick} axisLine={false} tickLine={false} />
-              <YAxis type="category" dataKey="domain" tick={axisTick} axisLine={false} tickLine={false} width={100} />
-              <ReTooltip formatter={(v: number) => [`${v}%`, "Average"]} contentStyle={tooltipStyle} />
-              <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={18} animationDuration={700}>
-                {data.domainBars.map((d) => (
-                  <Cell key={d.domain} fill={d.score < 60 ? "#D99A36" : "#245C45"} />
-                ))}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+          {data.domainBars.length > 0 ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data.domainBars} layout="vertical" margin={{ top: 0, right: 24, bottom: 0, left: 8 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" horizontal={false} />
+                <XAxis type="number" domain={[0, 100]} tick={axisTick} axisLine={false} tickLine={false} />
+                <YAxis type="category" dataKey="domain" tick={axisTick} axisLine={false} tickLine={false} width={100} />
+                <ReTooltip formatter={(v: number) => [`${v}%`, "Average"]} contentStyle={tooltipStyle} />
+                <Bar dataKey="score" radius={[0, 4, 4, 0]} barSize={18} animationDuration={700}>
+                  {data.domainBars.map((d) => (
+                    <Cell key={d.domain} fill={d.score < 60 ? "#D99A36" : "#245C45"} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+              No domain scores recorded yet
+            </div>
+          )}
         </ChartCard>
 
         <Card className="flex flex-col border-border bg-card p-5 shadow-none lg:col-span-3 pp-rise">
@@ -272,18 +332,18 @@ export default function StudentDashboard() {
           </div>
           {data.strong.length ? (
             <ul className="px-5 py-2">
-              {data.strong.map(([id, score]) => (
+              {data.strong.map((entry) => (
                 <li
-                  key={id}
+                  key={entry.id}
                   className="flex flex-col gap-2 border-b border-border/50 py-3.5 last:border-0 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div>
-                    <p className="text-sm font-medium text-foreground">{SKILL_BY_ID[id]?.name ?? id}</p>
+                    <p className="text-sm font-medium text-foreground">{entry.name}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Averaged {score}% across {data.byDate.length} assessments
+                      Averaged {entry.score}% across {data.byDate.length} assessments
                     </p>
                   </div>
-                  <MiniBar value={score} width={96} />
+                  <MiniBar value={entry.score} width={96} />
                 </li>
               ))}
             </ul>
@@ -302,18 +362,18 @@ export default function StudentDashboard() {
           </div>
           {data.target.length ? (
             <ul className="px-5 py-2">
-              {data.target.map(([id, score]) => (
-                <li key={id} className="flex items-start gap-3 border-b border-border/50 py-3.5 last:border-0">
+              {data.target.map((entry) => (
+                <li key={entry.id} className="flex items-start gap-3 border-b border-border/50 py-3.5 last:border-0">
                   <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-warning-soft text-warning">
                     <Target className="size-3.5" />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-foreground">{SKILL_BY_ID[id]?.name ?? id}</p>
-                      <ScorePill value={score} suffix="%" />
+                      <p className="text-sm font-medium text-foreground">{entry.name}</p>
+                      <ScorePill value={entry.score} suffix="%" />
                     </div>
                     <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                      {SKILL_GUIDANCE[id] ?? "Ask your trainer for a focused practice plan"}
+                      {SKILL_GUIDANCE[entry.id.toLowerCase()] ?? "Ask your trainer for a focused practice plan"}
                     </p>
                   </div>
                 </li>
@@ -351,7 +411,9 @@ export default function StudentDashboard() {
               </p>
               <div className="mt-3 flex gap-2.5">
                 <Quote className="mt-0.5 size-4 shrink-0 text-primary/60" aria-hidden />
-                <p className="text-[13px] leading-relaxed text-foreground">{latestFeedback.technical}</p>
+                <p className="text-[13px] leading-relaxed text-foreground">
+                  {latestFeedback.technical || latestFeedback.communication || "Interview completed successfully."}
+                </p>
               </div>
               {latestFeedback.strengths.length ? (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -414,13 +476,3 @@ export default function StudentDashboard() {
     </div>
   );
 }
-
-/* shared recharts styling */
-const axisTick = { fontSize: 12, fill: "#727C74" };
-const tooltipStyle = {
-  borderRadius: 10,
-  border: "1px solid #E4E9E4",
-  boxShadow: "0 4px 16px -8px rgba(32,41,35,0.16)",
-  fontSize: 13,
-  padding: "8px 12px",
-};

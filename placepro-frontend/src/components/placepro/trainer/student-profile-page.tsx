@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -33,12 +33,14 @@ import {
 } from "recharts";
 import { useAppStore } from "@/lib/placepro/store";
 import {
-  DOMAIN_GROUPS,
-  SKILL_BY_ID,
-  STUDENT_BY_ID,
-  getAssessmentHistory,
+  domainGroups,
+  domainScores,
+  skillDomain as getSkillDomain,
+  skillEntries,
+  skillName,
   studentDomainScore,
-} from "@/lib/placepro/mock-data";
+} from "@/lib/placepro/skill-taxonomy";
+import { api, type StudentAssessment } from "@/lib/placepro/api";
 import type { Assessment, Student } from "@/types";
 import { SectionHeading } from "@/components/placepro/shared/page-header";
 import { MiniBar, PRBadge, ScorePill, StatusBadge, scoreTone } from "@/components/placepro/shared/badges";
@@ -84,14 +86,6 @@ function fmtDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function skillLabel(id: string): string {
-  return SKILL_BY_ID[id]?.name ?? id;
-}
-
-function skillDomain(id: string): string {
-  return SKILL_BY_ID[id]?.domain ?? "—";
-}
-
 function barColor(value: number): string {
   if (value >= 60) return "#245C45";
   if (value >= 45) return "#D99A36";
@@ -101,37 +95,75 @@ function barColor(value: number): string {
 export default function StudentProfilePage() {
   const navigate = useAppStore((s) => s.navigate);
   const route = useAppStore((s) => s.route);
-  const feedback = useAppStore((s) => s.feedback);
+  const skills = useAppStore((s) => s.skills);
 
   const studentId = route.params?.studentId;
-  const student: Student | undefined = studentId ? STUDENT_BY_ID[studentId] : undefined;
+  const [student, setStudent] = useState<Student>();
+  const [historyResponse, setHistoryResponse] = useState<StudentAssessment[]>([]);
+  const [feedback, setFeedback] = useState<import("@/types").TrainerFeedback[]>([]);
+  const [loadedForStudentId, setLoadedForStudentId] = useState<string>();
+  const loading = Boolean(studentId && loadedForStudentId !== studentId);
+
+  useEffect(() => {
+    if (!studentId) {
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([api.student(studentId), api.studentAssessments(studentId), api.studentFeedback(studentId)])
+      .then(([profile, assessments, studentFeedback]) => {
+        if (cancelled) return;
+        setStudent(profile);
+        setHistoryResponse(assessments.items);
+        setFeedback(studentFeedback);
+        setLoadedForStudentId(studentId);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setStudent(undefined);
+          setHistoryResponse([]);
+          setFeedback([]);
+          setLoadedForStudentId(studentId);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [studentId]);
 
   const model = useMemo(() => {
-    if (!student) return null;
-    const history = getAssessmentHistory(student.id);
+    if (!student || !studentId) return null;
+    const history: Assessment[] = historyResponse.map((assessment) => ({
+      id: assessment.assessmentId,
+      name: assessment.name,
+      type: assessment.type,
+      batch: student.batch,
+      date: assessment.date,
+      uploadedBy: "",
+      reviewed: true,
+      results: [{
+        studentId: student.id,
+        marks: assessment.marks,
+        maxMarks: assessment.maxMarks,
+        percentage: assessment.percentage,
+      }],
+    }));
     const sortedHistory = [...history].sort((a, b) => +new Date(b.date) - +new Date(a.date));
     const resultFor = (a: Assessment) => a.results.find((r) => r.studentId === student.id);
     const assessed = sortedHistory.filter((a) => resultFor(a) !== undefined);
     const avgPct = assessed.length
       ? Math.round(
-          (assessed.reduce((sum, a) => sum + (resultFor(a)?.percentage ?? 0), 0) / assessed.length) * 10,
-        ) / 10
+        (assessed.reduce((sum, a) => sum + (resultFor(a)?.percentage ?? 0), 0) / assessed.length) * 10,
+      ) / 10
       : 0;
-    const technical = Math.round(
-      ((student.scores.dsa +
-        student.scores.dbms +
-        student.scores.os +
-        student.scores.cn +
-        student.scores.oops +
-        student.scores.java +
-        student.scores.springboot) /
-        7) *
-        10,
-    ) / 10;
 
-    const skillEntries = Object.entries(student.scores)
-      .map(([id, score]) => ({ id, score, name: skillLabel(id), domain: skillDomain(id) }))
-      .sort((a, b) => b.score - a.score);
+    const allSkillEntries = skillEntries(student, skills).sort((a, b) => b.score - a.score);
+    const techEntries = allSkillEntries.filter(
+      (e) =>
+        !e.domain.toLowerCase().includes("communication") &&
+        !e.domain.toLowerCase().includes("soft") &&
+        e.id !== "comm"
+    );
+    const technical = techEntries.length
+      ? Math.round((techEntries.reduce((sum, e) => sum + e.score, 0) / techEntries.length) * 10) / 10
+      : student.average;
 
     const approvedFeedback = feedback
       .filter((f) => f.studentId === student.id && f.approved)
@@ -146,15 +178,21 @@ export default function StudentProfilePage() {
       resultFor,
       avgPct,
       technical,
-      skillEntries,
-      strong: skillEntries.filter((s) => s.score >= 75),
-      targets: [...skillEntries].filter((s) => s.score < 60).sort((a, b) => a.score - b.score),
+      skillEntries: allSkillEntries,
+      strong: allSkillEntries.filter((s) => s.score >= 75),
+      targets: [...allSkillEntries].filter((s) => s.score < 60).sort((a, b) => a.score - b.score),
       latestFeedback: approvedFeedback[0],
       interviewFeedback,
     };
-  }, [student, feedback]);
+  }, [student, studentId, historyResponse, feedback, skills]);
+
+  const groups = useMemo(() => domainGroups(skills), [skills]);
 
   /* ------------------------------ not found ------------------------------ */
+  if (loading) {
+    return <div className="p-8 text-center text-sm text-muted-foreground">Loading student profile…</div>;
+  }
+
   if (!student || !model) {
     return (
       <div className="space-y-6">
@@ -182,9 +220,9 @@ export default function StudentProfilePage() {
     );
   }
 
-  const radarData = DOMAIN_GROUPS.map((g) => ({
+  const radarData = groups.map((g) => ({
     domain: RADAR_LABEL[g.label] ?? g.label,
-    score: studentDomainScore(student, g.label),
+    score: studentDomainScore(student, g.label, skills),
   }));
   const trendData = student.trend.map((v, i) => ({ assessment: i + 1, score: v }));
   const barData = model.skillEntries.map((s) => ({ name: s.name, score: s.score }));
@@ -206,8 +244,8 @@ export default function StudentProfilePage() {
     lines.push("");
     lines.push("DOMAIN AVERAGES");
     lines.push("---------------");
-    for (const g of DOMAIN_GROUPS) {
-      lines.push(`${g.label.padEnd(24)} ${studentDomainScore(student, g.label)}%`);
+    for (const g of groups) {
+      lines.push(`${g.label.padEnd(24)} ${studentDomainScore(student, g.label, skills)}%`);
     }
     lines.push("");
     lines.push("SKILL SCORES");
@@ -399,24 +437,26 @@ export default function StudentProfilePage() {
               />
             </div>
             <div>
-              {DOMAIN_GROUPS.map((g) => {
-                const skills = g.skills.filter((id) => student.scores[id] !== undefined);
-                if (skills.length === 0) return null;
+              {groups.map((g) => {
+                const groupSkills = model.skillEntries.filter(
+                  (s) => s.domain.toLowerCase() === g.label.toLowerCase()
+                );
+                if (groupSkills.length === 0) return null;
                 return (
                   <div key={g.label} className="border-b border-border/50 px-5 py-3.5 last:border-0">
                     <div className="flex items-center justify-between gap-4">
                       <p className="text-sm font-medium text-foreground">{g.label}</p>
                       <span className="tabular text-[13px] font-semibold text-foreground">
-                        {studentDomainScore(student, g.label)}%
+                        {studentDomainScore(student, g.label, skills)}%
                       </span>
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
-                      {skills.map((id) => (
-                        <span key={id} className="flex items-center gap-2">
+                      {groupSkills.map((entry) => (
+                        <span key={entry.id} className="flex items-center gap-2">
                           <span className="w-28 shrink-0 truncate text-xs text-muted-foreground">
-                            {skillLabel(id)}
+                            {entry.name}
                           </span>
-                          <MiniBar value={student.scores[id]} width={36} />
+                          <MiniBar value={entry.score} width={36} />
                         </span>
                       ))}
                     </div>

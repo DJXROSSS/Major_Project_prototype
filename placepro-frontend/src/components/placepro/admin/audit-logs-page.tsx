@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { RotateCcw, ScrollText } from "lucide-react";
-import { AUDIT_LOGS } from "@/lib/placepro/mock-data";
+import { useAppStore } from "@/lib/placepro/store";
 import type { AuditLog } from "@/types";
 import { PageHeader } from "@/components/placepro/shared/page-header";
 import { SearchInput, FilterSelect } from "@/components/placepro/shared/controls";
@@ -37,30 +37,26 @@ export default function AuditLogsPage() {
   const [moduleFilter, setModuleFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 550);
-    return () => clearTimeout(t);
-  }, []);
+  const logs = useAppStore((s) => s.auditLogs);
+  const loading = useAppStore((s) => s.isRefreshing);
 
   const modules = useMemo(
-    () => Array.from(new Set(AUDIT_LOGS.map((l) => l.module))).sort(),
-    [],
+    () => Array.from(new Set(logs.map((l) => l.module))).sort(),
+    [logs],
   );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return [...AUDIT_LOGS]
+    return [...logs]
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
       .filter((l) => {
-        if (q && !l.user.toLowerCase().includes(q) && !l.action.toLowerCase().includes(q) && !l.record.toLowerCase().includes(q))
+        if (q && !l.user.toLowerCase().includes(q) && !l.action.toLowerCase().includes(q) && !(l.record ?? "").toLowerCase().includes(q))
           return false;
         if (moduleFilter !== "all" && l.module !== moduleFilter) return false;
         if (statusFilter !== "all" && l.status !== statusFilter) return false;
         return true;
       });
-  }, [search, moduleFilter, statusFilter]);
+  }, [logs, search, moduleFilter, statusFilter]);
 
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, pageCount);
@@ -169,8 +165,8 @@ export default function AuditLogsPage() {
                         </span>
                       </td>
                       <td className="max-w-[240px] px-2 py-3">
-                        <span className="block truncate text-[13px] text-muted-foreground" title={log.record}>
-                          {log.record}
+                        <span className="block truncate text-[13px] text-muted-foreground" title={log.record ?? ""}>
+                          {log.record || "—"}
                         </span>
                       </td>
                       <td className="py-3 pl-2 pr-5 text-right">

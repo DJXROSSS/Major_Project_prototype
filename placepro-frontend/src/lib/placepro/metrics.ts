@@ -20,7 +20,14 @@ export function domainScore(student: Student, domain: string): number | undefine
 }
 
 export function weakestDomain(student: Student): { domain: string; score?: number } {
-  return DOMAIN_LABELS.map((domain) => ({ domain, score: domainScore(student, domain) }))
-    .filter((item): item is { domain: string; score: number } => item.score !== undefined)
-    .sort((a, b) => a.score - b.score)[0] ?? { domain: "Unavailable" };
+  const scored: { domain: string; score: number }[] = [];
+  for (const domain of DOMAIN_LABELS) {
+    const score = domainScore(student, domain);
+    if (typeof score === "number") {
+      scored.push({ domain, score });
+    }
+  }
+  if (scored.length === 0) return { domain: "Unavailable" };
+  scored.sort((a, b) => a.score - b.score);
+  return scored[0];
 }

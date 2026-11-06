@@ -1,3 +1,4 @@
+
 "use client";
 
 import { Badge } from "@/components/ui/badge";
@@ -45,7 +46,18 @@ export function StatusBadge({
 }) {
   return (
     <Badge className={cn("border-transparent font-medium hover:inherit", TONE_CLASS[tone], className)}>
-      {dot ? <span className={cn("mr-1.5 size-1.5 rounded-full", tone === "success" ? "bg-success" : tone === "warning" ? "bg-warning" : tone === "danger" ? "bg-danger" : tone === "info" ? "bg-info" : "bg-muted-foreground")} /> : null}
+      {dot ? (
+        <span
+          className={cn(
+            "mr-1.5 size-1.5 rounded-full",
+            tone === "success" ? "bg-success" :
+            tone === "warning" ? "bg-warning" :
+            tone === "danger" ? "bg-danger" :
+            tone === "info" ? "bg-info" :
+            "bg-muted-foreground"
+          )}
+        />
+      ) : null}
       {children}
     </Badge>
   );
@@ -56,16 +68,45 @@ export function StatusBadge({
 /* ------------------------------------------------------------------ */
 
 export function scoreTone(value: number): SemanticTone {
+  if (!Number.isFinite(value)) return "neutral";
   if (value >= 75) return "success";
   if (value >= 60) return "info";
   if (value >= 45) return "warning";
   return "danger";
 }
 
-export function ScorePill({ value, suffix }: { value: number; suffix?: string }) {
-  const tone = scoreTone(value);
-  const text = tone === "success" ? "text-success" : tone === "info" ? "text-info" : tone === "warning" ? "text-warning" : "text-danger";
-  return <span className={cn("tabular text-[13px] font-semibold", text)}>{value}{suffix ?? ""}</span>;
+function normalizeScore(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+export function ScorePill({
+  value,
+  suffix,
+}: {
+  value: number | string | null | undefined;
+  suffix?: string;
+}) {
+  const numericValue = normalizeScore(value);
+  const tone = numericValue === null ? "neutral" : scoreTone(numericValue);
+
+  const text =
+    tone === "success" ? "text-success" :
+    tone === "info" ? "text-info" :
+    tone === "warning" ? "text-warning" :
+    tone === "danger" ? "text-danger" :
+    "text-muted-foreground";
+
+  return (
+    <span className={cn("tabular text-[13px] font-semibold", text)}>
+      {numericValue === null ? "—" : `${numericValue}${suffix ?? ""}`}
+    </span>
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -80,14 +121,42 @@ const BAR_COLOR: Record<SemanticTone, string> = {
   neutral: "bg-muted-foreground/40",
 };
 
-export function MiniBar({ value, className, width = 44 }: { value: number; className?: string; width?: number }) {
-  const tone = scoreTone(value);
+export function MiniBar({
+  value,
+  className,
+  width = 44,
+}: {
+  value: number | string | null | undefined;
+  className?: string;
+  width?: number;
+}) {
+  const numericValue = normalizeScore(value);
+  const isValid = numericValue !== null;
+
+  const safeValue = isValid
+    ? Math.min(100, Math.max(0, numericValue))
+    : 0;
+
+  const tone = isValid ? scoreTone(safeValue) : "neutral";
+
   return (
     <span className={cn("inline-flex items-center gap-2", className)}>
-      <span className="h-1.5 overflow-hidden rounded-full bg-muted" style={{ width }}>
-        <span className={cn("block h-full rounded-full", BAR_COLOR[tone])} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+      <span
+        className="h-1.5 overflow-hidden rounded-full bg-muted"
+        style={{ width }}
+      >
+        <span
+          className={cn(
+            "block h-full rounded-full",
+            BAR_COLOR[tone]
+          )}
+          style={{ width: `${safeValue}%` }}
+        />
       </span>
-      <span className="tabular w-8 text-[13px] font-medium text-foreground">{Math.round(value)}</span>
+
+      <span className="tabular w-8 text-[13px] font-medium text-foreground">
+        {isValid ? Math.round(numericValue) : "—"}
+      </span>
     </span>
   );
 }

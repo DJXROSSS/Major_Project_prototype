@@ -1,4 +1,4 @@
-import type { AppUser, Assessment, Batch, Company, SessionUser, Skill, Student, TrainerFeedback } from "@/types";
+import type { AppUser, Assessment, AuditLog, Batch, Company, MatchResult, SessionUser, Skill, Student, TrainerFeedback } from "@/types";
 import { logger } from "@/lib/logger";
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000/api/v1").replace(/\/$/, "");
@@ -37,6 +37,28 @@ const pageItems = <T>(value: { items: T[] } | T[]) => Array.isArray(value) ? val
 
 type Paginated<T> = { items: T[]; page: number; pageSize: number; total: number };
 
+export type DashboardData = {
+  role: "admin" | "trainer" | "student";
+  totalStudents?: number;
+  prCount?: number;
+  nprCount?: number;
+  topPerformers?: Student[];
+  attentionList?: Student[];
+  userCounts?: { role: string; status: string; count: number }[];
+  batchReadiness?: { batch: string; total: number; pr_count: number; npr_count: number }[];
+  recentAuditLogs?: AuditLog[];
+};
+
+export type StudentAssessment = {
+  assessmentId: string;
+  name: string;
+  type: Assessment["type"];
+  date: string;
+  marks: number;
+  maxMarks: number;
+  percentage: number;
+};
+
 const qs = (params: Record<string, string | number | boolean | undefined>) => {
   const sp = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -60,17 +82,17 @@ export const api = {
   login: (email: string, password: string) => request<{ user: SessionUser }>("/auth/login", json("POST", { email, password })),
   me: () => request<{ user: SessionUser }>("/auth/me"),
   logout: () => request<void>("/auth/logout", json("POST")),
-  dashboard: () => request<unknown>("/dashboard"),
+  dashboard: () => request<DashboardData>("/dashboard"),
   // Import validation needs the full roster, not just the first page of students.
   students: () => request<{ items: Student[] }>("/students?pageSize=1000"),
   // Paged roster for a single batch (used by the import wizard).
   listStudents: (p: { batchId?: string; page?: number; pageSize?: number; q?: string }) =>
     request<Paginated<Student>>(`/students${qs(p)}`),
   student: (id: string) => request<Student>(`/students/${id}`),
-  studentAssessments: (id: string) => request<unknown>(`/students/${id}/assessments`),
+  studentAssessments: (id: string) => request<Paginated<StudentAssessment>>(`/students/${id}/assessments`),
   studentFeedback: (id: string) => request<TrainerFeedback[]>(`/students/${id}/feedback`),
   myStudent: () => request<Student>("/me/student"),
-  myAssessments: () => request<unknown>("/me/assessments"),
+  myAssessments: () => request<Paginated<StudentAssessment>>("/me/assessments"),
   myFeedback: () => request<TrainerFeedback[]>("/me/feedback"),
   assessments: async () => pageItems(await request<{ items: Assessment[] }>("/assessments?pageSize=100")),
   assessment: (id: string) => request<Assessment>(`/assessments/${id}`),
@@ -81,7 +103,8 @@ export const api = {
   createCompany: (payload: Omit<Company, "id"> | Company) => request<Company>("/companies", json("POST", payload)),
   updateCompany: (id: string, payload: Partial<Company>) => request<Company>(`/companies/${id}`, json("PATCH", payload)),
   deleteCompany: (id: string) => request<void>(`/companies/${id}`, { method: "DELETE" }),
-  companyMatches: (id: string, payload: unknown) => request<unknown>(`/companies/${id}/matches`, json("POST", payload)),
+  companyMatches: (id: string, payload: unknown) =>
+    request<{ items: MatchResult[]; page: number; pageSize: number; total: number }>(`/companies/${id}/matches`, json("POST", payload)),
   users: async () => pageItems(await request<{ items: AppUser[] }>("/users?pageSize=100")),
   createUser: (payload: Partial<AppUser>) => request<AppUser>("/users", json("POST", payload)),
   updateUser: (id: string, payload: Partial<AppUser>) => request<AppUser>(`/users/${id}`, json("PATCH", payload)),
@@ -99,7 +122,19 @@ export const api = {
   createSkill: (payload: Omit<Skill, "id"> | Skill) => request<Skill>("/skills", json("POST", payload)),
   updateSkill: (id: string, payload: Partial<Skill>) => request<Skill>(`/skills/${id}`, json("PATCH", payload)),
   deleteSkill: (id: string) => request<void>(`/skills/${id}`, { method: "DELETE" }),
-  auditLogs: () => request<unknown>("/audit-logs?pageSize=100"),
+  auditLogs: async (p: { q?: string; module?: string; status?: string; page?: number; pageSize?: number } = {}) => {
+    const response = await request<Paginated<Omit<AuditLog, "user"> & { actor: string; metadata?: Record<string, unknown> }>>(
+      `/audit-logs${qs({ pageSize: 100, ...p })}`
+    );
+    return {
+      ...response,
+      items: response.items.map((log) => ({
+        ...log,
+        user: log.actor || (log as { user?: string }).user || "System",
+        record: log.record ?? (log.metadata ? JSON.stringify(log.metadata) : ""),
+      })),
+    };
+  },
   studentVerificationRequests: () => request<StudentVerificationRequest[]>("/import-student-reviews"),
   approveStudentVerification: (id: string, payload: { name: string; email: string; branch?: string; section?: string }) =>
     request<unknown>(`/import-student-reviews/${id}/approve`, json("POST", payload)),

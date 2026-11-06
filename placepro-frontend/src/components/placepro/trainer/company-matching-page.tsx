@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
   BadgeCheck,
@@ -13,7 +13,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
-import { SKILL_BY_ID, STUDENTS } from "@/lib/placepro/mock-data";
+import { api } from "@/lib/placepro/api";
+import { skillName } from "@/lib/placepro/skill-taxonomy";
 import type { Company, MatchResult, Student } from "@/types";
 import { PageHeader } from "@/components/placepro/shared/page-header";
 import { MiniBar, PRBadge, ScorePill, StatusBadge } from "@/components/placepro/shared/badges";
@@ -84,37 +85,6 @@ function cloneState(state: CriteriaState): CriteriaState {
   return { minCgpa: state.minCgpa, criteria: state.criteria.map((c) => ({ ...c })) };
 }
 
-/** Eligibility + weighted compatibility for one student against a criteria state */
-function evaluate(student: Student, state: CriteriaState): MatchResult {
-  const failed: string[] = [];
-
-  if (student.cgpa < state.minCgpa) {
-    failed.push(`CGPA ${student.cgpa.toFixed(1)} < ${state.minCgpa.toFixed(1)}`);
-  }
-
-  for (const c of state.criteria) {
-    const score = student.scores[c.skillId] ?? 0;
-    if (c.mandatory && score < c.minCutoff) {
-      const name = SKILL_BY_ID[c.skillId]?.name ?? c.skillId;
-      failed.push(`${name} ${score} < ${c.minCutoff} (mandatory)`);
-    }
-  }
-
-  const totalWeight = state.criteria.reduce((a, c) => a + c.weightage, 0);
-  const weighted = state.criteria.reduce(
-    (a, c) => a + (student.scores[c.skillId] ?? 0) * c.weightage,
-    0,
-  );
-  const compatibility = totalWeight > 0 ? weighted / totalWeight : 0;
-
-  return {
-    student,
-    eligible: failed.length === 0,
-    compatibility: Math.round(compatibility * 10) / 10,
-    failedRequirements: failed,
-  };
-}
-
 const csvEscape = (v: string | number) => {
   const s = String(v);
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -130,6 +100,7 @@ const slugify = (s: string) =>
 export default function CompanyMatchingPage() {
   const { toast } = useToast();
   const companies = useAppStore((s) => s.companies);
+  const skills = useAppStore((s) => s.skills);
 
   const [companyId, setCompanyId] = useState<string>(companies[0]?.id ?? "");
   const company = companies.find((c) => c.id === companyId) ?? companies[0];
@@ -141,12 +112,44 @@ export default function CompanyMatchingPage() {
     company ? fromCompany(company) : { minCgpa: 7, criteria: [] },
   );
 
+  const [results, setResults] = useState<MatchResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
   const [view, setView] = useState<"eligible" | "ineligible" | "all">("eligible");
   const [search, setSearch] = useState("");
   const [prFilter, setPrFilter] = useState("all");
   const [sortBy, setSortBy] = useState<SortKey>("compat");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const fetchMatches = async (cid: string, state: CriteriaState) => {
+    if (!cid) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await api.companyMatches(cid, {
+        criteriaOverride: {
+          minCgpa: state.minCgpa,
+          criteria: state.criteria,
+        },
+        page: 1,
+        pageSize: 1000,
+      });
+      setResults(res.items);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load matches");
+      setResults([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (company?.id) {
+      fetchMatches(company.id, applied);
+    }
+  }, [company?.id, applied]);
 
   /* ------------------------- company selection ------------------------- */
 
@@ -160,14 +163,10 @@ export default function CompanyMatchingPage() {
     setApplied(cloneState(fresh));
     setSelected(new Set());
     setPage(1);
+    fetchMatches(next.id, fresh);
   };
 
   /* --------------------------- evaluation ----------------------------- */
-
-  const results = useMemo<MatchResult[]>(
-    () => STUDENTS.map((s) => evaluate(s, applied)),
-    [applied],
-  );
 
   const eligibleResults = useMemo(
     () =>
@@ -278,9 +277,12 @@ export default function CompanyMatchingPage() {
     setApplied(cloneState(draft));
     setSelected(new Set());
     setPage(1);
+    if (company?.id) {
+      fetchMatches(company.id, draft);
+    }
     toast({
       title: "Criteria applied",
-      description: `Eligibility and compatibility recomputed for ${results.length} candidates against ${company?.name ?? "this profile"}.`,
+      description: `Eligibility and compatibility evaluated by server against ${company?.name ?? "this profile"}.`,
     });
   };
 
@@ -291,6 +293,7 @@ export default function CompanyMatchingPage() {
     setApplied(cloneState(fresh));
     setSelected(new Set());
     setPage(1);
+    fetchMatches(company.id, fresh);
     toast({
       title: "Criteria reset to saved",
       description: "Restored the profile configured by the administrator.",
@@ -330,7 +333,7 @@ export default function CompanyMatchingPage() {
     if (rows.length === 0) return;
 
     const skillNames = applied.criteria.map(
-      (c) => SKILL_BY_ID[c.skillId]?.name ?? c.skillId,
+      (c) => skillName(skills, c.skillId),
     );
     const header = [
       "Rank",
@@ -478,7 +481,7 @@ export default function CompanyMatchingPage() {
               </thead>
               <tbody>
                 {draft.criteria.map((c, i) => {
-                  const skillName = SKILL_BY_ID[c.skillId]?.name ?? c.skillId;
+                  const sName = skillName(skills, c.skillId);
                   return (
                     <tr key={c.skillId} className="border-b border-border/50 last:border-0">
                       <td className="relative py-2.5 pl-5 pr-2">
@@ -491,7 +494,7 @@ export default function CompanyMatchingPage() {
                         />
                         <span className="flex flex-wrap items-center gap-2">
                           <span className="text-[13px] font-medium text-foreground">
-                            {skillName}
+                            {sName}
                           </span>
                           {c.mandatory ? (
                             <StatusBadge tone="warning" className="px-1.5 py-0 text-[10px]">
@@ -515,7 +518,7 @@ export default function CompanyMatchingPage() {
                               });
                             }
                           }}
-                          aria-label={`${skillName} minimum cutoff`}
+                          aria-label={`${sName} minimum cutoff`}
                           className="h-8 w-20 text-[13px] tabular"
                         />
                       </td>
@@ -731,8 +734,24 @@ export default function CompanyMatchingPage() {
             </div>
           ) : null}
 
-          {/* table / empty state */}
-          {pageRows.length === 0 ? (
+          {/* table / loading / error / empty state */}
+          {loading ? (
+            <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
+              Evaluating candidate pool against company cutoffs…
+            </div>
+          ) : error ? (
+            <div className="p-8 text-center">
+              <p className="text-sm font-medium text-danger">{error}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3 h-8 text-[13px]"
+                onClick={() => fetchMatches(companyId, applied)}
+              >
+                Retry matching
+              </Button>
+            </div>
+          ) : pageRows.length === 0 ? (
             <EmptyState
               icon={ListChecks}
               title="No candidates match these filters"
@@ -780,7 +799,7 @@ export default function CompanyMatchingPage() {
                     {applied.criteria.map((c) => (
                       <th key={c.skillId} className="px-2 py-2.5 font-medium">
                         <span className="inline-flex items-center gap-1">
-                          {SKILL_BY_ID[c.skillId]?.name ?? c.skillId}
+                          {skillName(skills, c.skillId)}
                           {c.mandatory ? (
                             <span
                               className="inline-block size-1.5 rounded-full bg-warning"

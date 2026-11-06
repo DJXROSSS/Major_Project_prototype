@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { BarChart3, GraduationCap, Layers, Pencil, Plus, Users } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
-import { DOMAIN_GROUPS, STUDENTS, domainAverage } from "@/lib/placepro/mock-data";
+import { domainAverage, domainGroups } from "@/lib/placepro/skill-taxonomy";
 import type { Batch } from "@/types";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { PRBadge, MiniBar } from "@/components/placepro/shared/badges";
@@ -41,6 +41,8 @@ const EMPTY_FORM: BatchForm = { name: "", department: "", academicYears: "", sec
 export default function BatchManagementPage() {
   const batches = useAppStore((s) => s.batches);
   const users = useAppStore((s) => s.users);
+  const students = useAppStore((s) => s.students);
+  const skills = useAppStore((s) => s.skills);
   const addBatch = useAppStore((s) => s.addBatch);
   const updateBatch = useAppStore((s) => s.updateBatch);
   const { toast } = useToast();
@@ -55,8 +57,10 @@ export default function BatchManagementPage() {
   const [statsBatch, setStatsBatch] = useState<Batch | null>(null);
 
   function liveStudentCount(batch: Batch) {
-    const live = STUDENTS.filter((s) => s.batch === batch.name).length;
-    return live > 0 ? live : batch.studentCount;
+    const matching = students.filter(
+      (s) => s.batch === batch.name || (s as { batchId?: string }).batchId === batch.id
+    ).length;
+    return matching > 0 ? matching : (batch.studentCount ?? 0);
   }
 
   function openCreate() {
@@ -120,19 +124,24 @@ export default function BatchManagementPage() {
     setDialogOpen(false);
   }
 
-  /* batch statistics computed live from STUDENTS */
+  /* batch statistics computed live from store and taxonomy */
   const stats = useMemo(() => {
     if (!statsBatch) return null;
-    const students = STUDENTS.filter((s) => s.batch === statsBatch.name);
-    const pr = students.filter((s) => s.prStatus === "PR").length;
-    const npr = students.filter((s) => s.prStatus === "NPR").length;
-    const avgCgpa = students.length
-      ? Number((students.reduce((a, s) => a + s.cgpa, 0) / students.length).toFixed(2))
+    const batchStudents = students.filter(
+      (s) => s.batch === statsBatch.name || (s as { batchId?: string }).batchId === statsBatch.id
+    );
+    const pr = batchStudents.filter((s) => s.prStatus === "PR").length;
+    const npr = batchStudents.filter((s) => s.prStatus === "NPR").length;
+    const avgCgpa = batchStudents.length
+      ? Number((batchStudents.reduce((a, s) => a + s.cgpa, 0) / batchStudents.length).toFixed(2))
       : 0;
-    const domains = DOMAIN_GROUPS.map((g) => ({ label: g.label, value: domainAverage(students, g.label) }));
-    const top = [...students].sort((a, b) => b.average - a.average).slice(0, 3);
-    return { students, pr, npr, avgCgpa, domains, top };
-  }, [statsBatch]);
+    const domains = domainGroups(skills).map((g) => ({
+      label: g.label,
+      value: domainAverage(batchStudents, g.label, skills),
+    }));
+    const top = [...batchStudents].sort((a, b) => b.average - a.average).slice(0, 3);
+    return { students: batchStudents, pr, npr, avgCgpa, domains, top };
+  }, [statsBatch, students, skills]);
 
   return (
     <div className="space-y-6">

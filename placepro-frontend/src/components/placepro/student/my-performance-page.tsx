@@ -13,13 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { useAppStore } from "@/lib/placepro/store";
-import {
-  DOMAIN_GROUPS,
-  SKILL_BY_ID,
-  STUDENT_BY_ID,
-  getAssessmentHistory,
-  studentDomainScore,
-} from "@/lib/placepro/mock-data";
+import { domainScores, skillEntries } from "@/lib/placepro/skill-taxonomy";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { StatCard } from "@/components/placepro/shared/stat-card";
 import { ChartCard, EmptyState } from "@/components/placepro/shared/states";
@@ -42,12 +36,15 @@ function skillStatus(score: number): { label: string; tone: "success" | "info" |
 export default function MyPerformancePage() {
   const user = useAppStore((s) => s.user);
   const navigate = useAppStore((s) => s.navigate);
+  const students = useAppStore((s) => s.students);
+  const assessments = useAppStore((s) => s.assessments);
+  const skills = useAppStore((s) => s.skills);
 
-  const student = user?.studentId ? STUDENT_BY_ID[user.studentId] : undefined;
+  const student = students.find((entry) => entry.id === user?.studentId) ?? students[0];
 
   const data = useMemo(() => {
     if (!student) return null;
-    const history = getAssessmentHistory(student.id);
+    const history = assessments;
     const byDate = [...history].sort((a, b) => b.date.localeCompare(a.date));
     const percentages = history.flatMap((a) => {
       const r = a.results.find((x) => x.studentId === student.id);
@@ -55,22 +52,26 @@ export default function MyPerformancePage() {
     });
     const averageScore = percentages.length
       ? Math.round((percentages.reduce((a, b) => a + b, 0) / percentages.length) * 10) / 10
-      : 0;
+      : student.average;
     const best = percentages.length ? Math.max(...percentages) : 0;
     const bestAssessment = byDate.find((a) => {
       const r = a.results.find((x) => x.studentId === student.id);
       return r !== undefined && r.percentage === best;
     });
-    const subjects = Object.entries(student.scores).map(([id, score]) => ({
-      id,
-      name: SKILL_BY_ID[id]?.name ?? id,
-      domain: SKILL_BY_ID[id]?.domain ?? "—",
-      score,
-    }));
-    const domains = DOMAIN_GROUPS.map((g) => ({ label: g.label, score: studentDomainScore(student, g.label) }));
-    const trendData = student.trend.map((score, i) => ({ assessment: i + 1, score }));
+    const subjects = skillEntries(student, skills);
+    const domains = domainScores(student, skills).map((d) => ({ label: d.domain, score: d.score }));
+    let trendScores = student.trend ?? [];
+    if (!trendScores.length && byDate.length > 0) {
+      trendScores = [...byDate]
+        .reverse()
+        .flatMap((a) => {
+          const r = a.results.find((x) => x.studentId === student.id);
+          return r ? [r.percentage] : [];
+        });
+    }
+    const trendData = trendScores.map((score, i) => ({ assessment: i + 1, score }));
     return { byDate, averageScore, best, bestAssessment, subjects, domains, trendData };
-  }, [student]);
+  }, [student, assessments, skills]);
 
   if (!student || !data) {
     return (

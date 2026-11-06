@@ -50,6 +50,9 @@ export interface Student {
 
 export interface AssessmentResult {
   studentId: string;
+  /** Resolved by the assessment-details API using students.student_id. */
+  studentName?: string;
+  rollNumber?: string;
   marks: number;
   maxMarks: number;
   percentage: number;
@@ -66,6 +69,9 @@ export interface Assessment {
   /** true once a trainer has reviewed / approved the imported record */
   reviewed: boolean;
   sourceId?: string;
+  /** Summary fields included by the assessment listing endpoint. */
+  evaluatedCount?: number;
+  averageScore?: number;
 }
 
 /** Preserved original spreadsheet — the raw source of an import */
@@ -137,11 +143,14 @@ export interface Batch {
 
 export interface AuditLog {
   id: string;
-  actor: string;
+  /** Actor name returned by the audit API (legacy mock data calls this `user`). */
+  user: string;
+  actor?: string;
   action: string;
   module: string;
   timestamp: string;
   status: "success" | "warning" | "failed";
+  record?: string;
 }
 
 export interface ActivityItem {

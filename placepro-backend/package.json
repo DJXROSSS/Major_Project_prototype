@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/start-all.js",
-    "build": "node --check src/gateway/server.js && node -e \"require('./src/gateway/app')\"",
+    "build": "node --check src/gateway/server.js && node -e \"require('./src/gateway/app'); require('./src/services/admin/app'); require('./src/services/assessments/app'); require('./src/services/auth/app'); require('./src/services/companies/app'); require('./src/services/dashboard/app'); require('./src/services/students/app');\"",
     "start": "node scripts/start-all.js",
     "start:gateway": "node src/gateway/server.js",
     "start:auth": "node src/services/auth/server.js",

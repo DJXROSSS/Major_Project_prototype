@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { FileSpreadsheet, UsersRound } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
 import {
-  DOMAIN_GROUPS,
+  domainGroups,
+  domainScores,
   studentDomainScore,
-} from "@/lib/placepro/mock-data";
-import type { Student } from "@/types";
+} from "@/lib/placepro/skill-taxonomy";
+import type { Skill, Student } from "@/types";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { MiniBar, PRBadge } from "@/components/placepro/shared/badges";
 import { FilterSelect, SearchInput, type FilterOption } from "@/components/placepro/shared/controls";
@@ -30,7 +31,6 @@ const PR_OPTIONS: FilterOption[] = [
   { label: "Placement ready (PR)", value: "PR" },
   { label: "Not ready (NPR)", value: "NPR" },
 ];
-const DOMAIN_OPTIONS: FilterOption[] = DOMAIN_GROUPS.map((g) => ({ label: g.label, value: g.label }));
 const SORT_OPTIONS: FilterOption[] = [
   { label: "Average · high to low", value: "avg-desc" },
   { label: "Average · low to high", value: "avg-asc" },
@@ -56,10 +56,18 @@ interface StudentRow {
   prStatus: "PR" | "NPR";
 }
 
-function toRow(student: Student): StudentRow {
-  const s = student.scores;
-  const coreCs = (s.dbms + s.os + s.cn + s.oops) / 4;
-  const development = (s.java + s.springboot) / 2;
+function toRow(student: Student, skills: Skill[]): StudentRow {
+  const dScores = domainScores(student, skills);
+  const getDomainScore = (sub: string) => {
+    const f = dScores.find((d) => d.domain.toLowerCase().includes(sub.toLowerCase()));
+    return f ? f.score : 0;
+  };
+  const s = student.scores ?? {};
+  const dsa = s["dsa"] ?? getDomainScore("programming") ?? 0;
+  const coreCs = getDomainScore("core") || (s["dbms"] ?? 0);
+  const development = getDomainScore("development") || (s["spring_boot"] ?? s["java"] ?? 0);
+  const communication = getDomainScore("soft") || getDomainScore("communication") || (s["comm"] ?? 0);
+
   return {
     id: student.id,
     name: student.name,
@@ -68,10 +76,10 @@ function toRow(student: Student): StudentRow {
     batch: student.batch,
     section: student.section,
     cgpa: student.cgpa,
-    dsa: s.dsa,
+    dsa,
     coreCs,
     development,
-    communication: s.comm,
+    communication,
     average: student.average,
     prStatus: student.prStatus,
   };
@@ -81,7 +89,14 @@ export default function StudentsPage() {
   const navigate = useAppStore((s) => s.navigate);
   const students = useAppStore((s) => s.students);
   const batches = useAppStore((s) => s.batches);
+  const skills = useAppStore((s) => s.skills);
+  const isRefreshing = useAppStore((s) => s.isRefreshing);
+
   const batchOptions = useMemo(() => batches.map((b) => ({ label: b.name, value: b.name })), [batches]);
+  const domainOptions = useMemo<FilterOption[]>(
+    () => domainGroups(skills).map((g) => ({ label: g.label, value: g.label })),
+    [skills]
+  );
 
   /* ------------------------------ filters ------------------------------ */
   const [query, setQuery] = useState("");
@@ -92,12 +107,7 @@ export default function StudentsPage() {
   const [sort, setSort] = useState(DEFAULT_SORT);
   const [page, setPage] = useState(1);
 
-  /* simulated first-mount fetch */
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    const t = setTimeout(() => setLoading(false), 500);
-    return () => clearTimeout(t);
-  }, []);
+  const loading = isRefreshing && students.length === 0;
 
   const filtersActive =
     query.trim() !== "" || batch !== "all" || section !== "all" || pr !== "all" || domain !== "all";
@@ -115,10 +125,10 @@ export default function StudentsPage() {
   /* any filter interaction restarts pagination from the first page */
   const applyFilter =
     (setter: (v: string) => void) =>
-    (v: string): void => {
-      setter(v);
-      setPage(1);
-    };
+      (v: string): void => {
+        setter(v);
+        setPage(1);
+      };
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -132,9 +142,9 @@ export default function StudentsPage() {
     if (section !== "all") list = list.filter((s) => s.section === section);
     if (pr !== "all") list = list.filter((s) => s.prStatus === pr);
     if (domain !== "all") {
-      list = list.filter((s) => studentDomainScore(s, domain) < 60);
+      list = list.filter((s) => studentDomainScore(s, domain, skills) < 60);
     }
-    const mapped = list.map(toRow);
+    const mapped = list.map((s) => toRow(s, skills));
     switch (sort) {
       case "avg-asc":
         return mapped.sort((a, b) => a.average - b.average);
@@ -145,7 +155,7 @@ export default function StudentsPage() {
       default:
         return mapped.sort((a, b) => b.average - a.average);
     }
-  }, [students, query, batch, section, pr, domain, sort]);
+  }, [students, query, batch, section, pr, domain, sort, skills]);
 
   const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -157,15 +167,20 @@ export default function StudentsPage() {
         title="Students"
         subtitle={`${students.length} enrolled students across ${batches.length} active batches.`}
         actions={
-          <Button size="sm" className="h-9 bg-primary hover:bg-primary-hover" onClick={() => navigate("import")}>
-            <FileSpreadsheet className="size-4" /> Import results
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => navigate("import")}
+          >
+            <FileSpreadsheet className="size-4" /> Import CSV
           </Button>
         }
       />
 
-      {/* ------------------------------ filter toolbar ------------------------------ */}
-      <Card className="gap-0 border-border bg-card p-4 shadow-none">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+      <Card className="gap-0 border-border bg-card p-0 shadow-none">
+        {/* filter toolbar */}
+        <div className="flex flex-col gap-3 border-b border-border/70 p-5 lg:flex-row lg:items-center">
           <SearchInput
             value={query}
             onChange={applyFilter(setQuery)}
@@ -200,57 +215,43 @@ export default function StudentsPage() {
             <FilterSelect
               value={domain}
               onChange={applyFilter(setDomain)}
-              options={DOMAIN_OPTIONS}
+              options={domainOptions}
               allLabel="All domains"
               ariaLabel="Filter by weak domain (score below 60%)"
-              className="xl:w-[188px]"
+              className="xl:w-[180px]"
             />
             <FilterSelect
               value={sort}
-              onChange={applyFilter(setSort)}
+              onChange={setSort}
               options={SORT_OPTIONS}
-              allLabel="Sort"
               ariaLabel="Sort students"
-              className="col-span-2 sm:col-span-1 xl:ml-auto xl:w-[188px]"
+              className="xl:w-[188px]"
             />
           </div>
-          {filtersActive ? (
+          {filtersActive && (
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 shrink-0 px-3 text-[13px] text-muted-foreground hover:text-foreground"
               onClick={resetFilters}
+              className="h-9 self-start px-2 text-xs text-muted-foreground hover:text-foreground lg:self-auto"
             >
-              Reset filters
+              Reset
             </Button>
-          ) : null}
-        </div>
-      </Card>
-
-      {/* ------------------------------ student table ------------------------------ */}
-      <Card className="gap-0 overflow-hidden border-border bg-card p-0 shadow-none">
-        <div className="border-b border-border/70 px-5 py-4">
-          <SectionHeading
-            title="Student directory"
-            description={
-              rows.length === students.length
-                ? `All ${rows.length} students`
-                : `${rows.length} of ${students.length} students match the current filters`
-            }
-          />
+          )}
         </div>
 
+        {/* content */}
         {loading ? (
-          <TableSkeleton rows={10} />
-        ) : pageRows.length === 0 ? (
+          <TableSkeleton rows={8} />
+        ) : rows.length === 0 ? (
           <EmptyState
             icon={UsersRound}
             title="No students found"
             description="No students match the current search and filter combination. Try adjusting or clearing the filters."
             action={
               filtersActive ? (
-                <Button variant="outline" size="sm" className="h-9" onClick={resetFilters}>
-                  Reset filters
+                <Button variant="outline" size="sm" onClick={resetFilters} className="h-9">
+                  Reset all filters
                 </Button>
               ) : undefined
             }
@@ -258,20 +259,20 @@ export default function StudentsPage() {
         ) : (
           <>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[1120px] text-sm">
+              <table className="w-full text-left text-sm">
                 <thead>
-                  <tr className="border-b border-border/70 text-left text-xs text-muted-foreground">
-                    <th className="py-2.5 pl-5 pr-2 font-medium">Student</th>
-                    <th className="px-2 py-2.5 font-medium">Roll number</th>
-                    <th className="px-2 py-2.5 font-medium">Batch</th>
-                    <th className="px-2 py-2.5 font-medium">CGPA</th>
-                    <th className="px-2 py-2.5 font-medium">DSA</th>
-                    <th className="px-2 py-2.5 font-medium">Core CS</th>
-                    <th className="px-2 py-2.5 font-medium">Development</th>
-                    <th className="px-2 py-2.5 font-medium">Communication</th>
-                    <th className="px-2 py-2.5 font-medium">Average score</th>
-                    <th className="px-2 py-2.5 font-medium">Placement status</th>
-                    <th className="py-2.5 pl-2 pr-5 text-right font-medium">Action</th>
+                  <tr className="border-b border-border/70 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    <th className="py-2.5 pl-5 pr-2">Student</th>
+                    <th className="px-2 py-2.5">Roll No</th>
+                    <th className="px-2 py-2.5">Batch</th>
+                    <th className="px-2 py-2.5">CGPA</th>
+                    <th className="px-2 py-2.5">DSA</th>
+                    <th className="px-2 py-2.5">Core CS</th>
+                    <th className="px-2 py-2.5">Dev</th>
+                    <th className="px-2 py-2.5">Comm</th>
+                    <th className="px-2 py-2.5">Average</th>
+                    <th className="px-2 py-2.5">Status</th>
+                    <th className="py-2.5 pl-2 pr-5 text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>

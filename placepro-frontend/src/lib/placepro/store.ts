@@ -46,6 +46,8 @@ interface AppState {
   importedSources: ImportedSource[];
   feedback: TrainerFeedback[];
   students: import("@/types").Student[];
+  auditLogs: import("@/types").AuditLog[];
+  dashboard: import("./api").DashboardData | null;
   isRefreshing: boolean;
   dataError: string | null;
 
@@ -97,6 +99,8 @@ export const useAppStore = create<AppState>((set) => ({
   importedSources: [],
   feedback: [],
   students: [],
+  auditLogs: [],
+  dashboard: null,
   isRefreshing: false,
   dataError: null,
 
@@ -113,7 +117,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   logout: async () => {
     try { await api.logout(); } catch { /* Clear the local session even when the gateway is unavailable. */ }
-    set({ user: null, route: { page: "dashboard" } });
+    set({ user: null, route: { page: "dashboard" }, students: [], assessments: [], feedback: [], skills: [], batches: [], companies: [], users: [], auditLogs: [], dashboard: null });
   },
 
   restoreSession: async () => {
@@ -133,13 +137,17 @@ export const useAppStore = create<AppState>((set) => ({
     set({ isRefreshing: true, dataError: null });
     try {
       if (user.role === "student") {
-        const [student, assessmentResponse, feedback] = await Promise.all([api.myStudent(), api.myAssessments(), api.myFeedback()]);
-        const assessmentItems = Array.isArray(assessmentResponse) ? assessmentResponse : (assessmentResponse as { items?: Assessment[] }).items ?? [];
-        set({ assessments: assessmentItems as Assessment[], feedback, students: [student], isRefreshing: false });
+        const [student, assessmentResponse, feedback, skills] = await Promise.all([api.myStudent(), api.myAssessments(), api.myFeedback(), api.skills()]);
+        const assessments = assessmentResponse.items.map((item) => ({
+          id: item.assessmentId, name: item.name, type: item.type, batch: student.batch, date: item.date,
+          uploadedBy: "", reviewed: true,
+          results: [{ studentId: student.id, marks: item.marks, maxMarks: item.maxMarks, percentage: item.percentage }],
+        }));
+        set({ assessments, feedback, students: [student], skills, auditLogs: [], dashboard: { role: "student" }, isRefreshing: false });
         return;
       }
-      const [studentsResponse, assessments, companies, batches, skills] = await Promise.all([
-        api.students(), api.assessments(), api.companies(), api.batches(), api.skills(),
+      const [studentsResponse, assessments, companies, batches, skills, dashboard] = await Promise.all([
+        api.students(), api.assessments(), api.companies(), api.batches(), api.skills(), api.dashboard(),
       ]);
       const normalizedAssessments = assessments.map((item) => ({
         ...item,
@@ -149,9 +157,9 @@ export const useAppStore = create<AppState>((set) => ({
       }));
       if (user.role === "admin") {
         const [users, auditResponse] = await Promise.all([api.users(), api.auditLogs()]);
-        set({ users, feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items, isRefreshing: false });
+        set({ users, feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items, auditLogs: auditResponse.items, dashboard, isRefreshing: false });
       } else {
-        set({ feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items, isRefreshing: false });
+        set({ feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, students: studentsResponse.items, auditLogs: [], dashboard, isRefreshing: false });
       }
       // Keep the call here so all authorised data sources are exercised; student-dependent views fetch details by id.
       void studentsResponse;

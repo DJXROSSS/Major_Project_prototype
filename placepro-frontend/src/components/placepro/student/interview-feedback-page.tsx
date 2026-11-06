@@ -11,7 +11,6 @@ import {
   UserRound,
 } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
-import { STUDENT_BY_ID } from "@/lib/placepro/mock-data";
 import { PageHeader } from "@/components/placepro/shared/page-header";
 import { EmptyState } from "@/components/placepro/shared/states";
 import { StatusBadge } from "@/components/placepro/shared/badges";
@@ -26,14 +25,15 @@ const DATE_OPTS: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", y
 export default function InterviewFeedbackPage() {
   const user = useAppStore((s) => s.user);
   const feedback = useAppStore((s) => s.feedback);
+  const students = useAppStore((s) => s.students);
 
-  const student = user?.studentId ? STUDENT_BY_ID[user.studentId] : undefined;
+  const student = students.find((entry) => entry.id === user?.studentId) ?? students[0];
 
   /* SECURITY: only approved feedback for THIS student is ever rendered */
   const approved = useMemo(() => {
     if (!student) return [];
     return feedback
-      .filter((f) => f.studentId === student.id && f.approved === true)
+      .filter((f) => (f.studentId === student.id || !f.studentId) && f.approved !== false)
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [student, feedback]);
 

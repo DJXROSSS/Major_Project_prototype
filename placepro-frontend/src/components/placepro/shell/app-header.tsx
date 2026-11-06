@@ -11,7 +11,6 @@ import {
   UserRound,
 } from "lucide-react";
 import { useAppStore, routeLabels } from "@/lib/placepro/store";
-import { NOTIFICATIONS, STUDENTS } from "@/lib/placepro/mock-data";
 import { ROLE_NAV } from "@/lib/placepro/nav";
 import { Breadcrumbs } from "@/components/placepro/shared/page-header";
 import { Kbd, UserAvatar } from "@/components/placepro/shared/misc";
@@ -142,7 +141,7 @@ export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav: () => void }) 
 
 function NotificationBell() {
   const [read, setRead] = useState(false);
-  const unread = read ? 0 : NOTIFICATIONS.filter((n) => n.unread).length;
+  const unread = 0;
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -164,18 +163,7 @@ function NotificationBell() {
             Mark all as read
           </button>
         </div>
-        <ul className="max-h-80 overflow-y-auto pp-scrollbar">
-          {NOTIFICATIONS.map((n) => (
-            <li key={n.id} className="flex gap-3 border-b border-border/60 px-4 py-3 last:border-0">
-              <span className={cn("mt-1.5 size-2 shrink-0 rounded-full", n.unread && !read ? "bg-primary" : "bg-border")} />
-              <div className="min-w-0">
-                <p className="text-[13px] font-medium text-foreground">{n.title}</p>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{n.detail}</p>
-                <p className="mt-1 text-[11px] text-muted-foreground/70">{n.time}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
+        <p className="px-4 py-6 text-center text-sm text-muted-foreground">Notifications are not available yet.</p>
       </PopoverContent>
     </Popover>
   );
@@ -189,13 +177,14 @@ function SearchCommand({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   const user = useAppStore((s) => s.user);
   const navigate = useAppStore((s) => s.navigate);
   const users = useAppStore((s) => s.users);
+  const students = useAppStore((s) => s.students);
 
   const navItems = useMemo(() => (user ? ROLE_NAV[user.role] : []), [user]);
   if (!user) return null;
 
   const isTrainer = user.role === "trainer";
   const isAdmin = user.role === "admin";
-  const searchPool = isTrainer ? STUDENTS : isAdmin ? users : [];
+  const searchPool = isTrainer ? students : isAdmin ? users : [];
 
   const run = (action: () => void) => {
     action();
@@ -205,7 +194,7 @@ function SearchCommand({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
       <CommandInput
-        placeholder={isTrainer ? "Search students by name or roll number…" : isAdmin ? "Search users or jump to a page…" : "Jump to a page…"}
+        placeholder={isTrainer ? "Search students by name, roll number, or batch…" : isAdmin ? "Search users or jump to a page…" : "Jump to a page…"}
       />
       <CommandList className="pp-scrollbar">
         <CommandEmpty>No results found.</CommandEmpty>
@@ -222,16 +211,17 @@ function SearchCommand({ open, onOpenChange }: { open: boolean; onOpenChange: (v
 
         {isTrainer ? (
           <CommandGroup heading="Students">
-            {searchPool.slice(0, 30).map((s) => (
+            {students.slice(0, 50).map((s) => (
               <CommandItem
                 key={s.id}
-                value={`${s.name} ${s.rollNumber}`}
+                value={`${s.name} ${s.rollNumber} ${s.batch}`}
                 onSelect={() => run(() => navigate("student-profile", { studentId: s.id }))}
                 className="text-[13px]"
               >
                 <UserAvatar name={s.name} size="sm" />
-                <span>{s.name}</span>
+                <span className="font-medium text-foreground">{s.name}</span>
                 <span className="ml-1 text-xs text-muted-foreground">{s.rollNumber}</span>
+                <span className="ml-auto text-[11px] text-muted-foreground">{s.batch}</span>
               </CommandItem>
             ))}
           </CommandGroup>

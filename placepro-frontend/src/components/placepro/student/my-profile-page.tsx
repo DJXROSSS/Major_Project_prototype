@@ -2,7 +2,7 @@
 
 import { GraduationCap, Lock, UserRound } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
-import { STUDENT_BY_ID, getAssessmentHistory } from "@/lib/placepro/mock-data";
+import { skillEntries } from "@/lib/placepro/skill-taxonomy";
 import { PageHeader } from "@/components/placepro/shared/page-header";
 import { EmptyState } from "@/components/placepro/shared/states";
 import { PRBadge } from "@/components/placepro/shared/badges";
@@ -15,8 +15,11 @@ import { Card } from "@/components/ui/card";
 
 export default function MyProfilePage() {
   const user = useAppStore((s) => s.user);
+  const students = useAppStore((s) => s.students);
+  const assessments = useAppStore((s) => s.assessments);
+  const skills = useAppStore((s) => s.skills);
 
-  const student = user?.studentId ? STUDENT_BY_ID[user.studentId] : undefined;
+  const student = students.find((entry) => entry.id === user?.studentId) ?? students[0];
 
   if (!student) {
     return (
@@ -28,7 +31,8 @@ export default function MyProfilePage() {
     );
   }
 
-  const assessmentsTaken = getAssessmentHistory(student.id).length;
+  const assessmentsTaken = assessments.length;
+  const evaluatedSkills = skillEntries(student, skills);
 
   return (
     <div className="space-y-6">
@@ -82,6 +86,9 @@ export default function MyProfilePage() {
               </InfoRow>
               <InfoRow label="Assessments taken">
                 <span className="tabular">{assessmentsTaken}</span>
+              </InfoRow>
+              <InfoRow label="Skills evaluated">
+                <span className="tabular">{evaluatedSkills.length}</span>
               </InfoRow>
               <InfoRow label="Readiness">
                 <PRBadge status={student.prStatus} />

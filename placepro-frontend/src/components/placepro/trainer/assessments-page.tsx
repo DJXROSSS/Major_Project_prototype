@@ -12,7 +12,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
-import { BATCHES, STUDENT_BY_ID } from "@/lib/placepro/mock-data";
+import { api } from "@/lib/placepro/api";
 import type { Assessment } from "@/types";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { MiniBar, ScorePill, StatusBadge } from "@/components/placepro/shared/badges";
@@ -52,6 +52,8 @@ const PAGE_SIZE = 10;
 export default function AssessmentsPage() {
   const { toast } = useToast();
   const assessments = useAppStore((s) => s.assessments);
+  const batches = useAppStore((s) => s.batches);
+  const students = useAppStore((s) => s.students);
   const importedSources = useAppStore((s) => s.importedSources);
   const navigate = useAppStore((s) => s.navigate);
   const markAssessmentReviewed = useAppStore((s) => s.markAssessmentReviewed);
@@ -63,6 +65,8 @@ export default function AssessmentsPage() {
   const [monthFilter, setMonthFilter] = useState("all");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Assessment | null>(null);
+  const [selectedDetails, setSelectedDetails] = useState<Assessment | null>(null);
+  const [detailsLoading, setDetailsLoading] = useState(false);
 
   /* simulated fetch so the table skeleton is visible */
   useEffect(() => {
@@ -81,12 +85,12 @@ export default function AssessmentsPage() {
   const kpis = useMemo(() => {
     const exams = assessments.filter((a) => a.type === "exam").length;
     const mocks = assessments.filter((a) => a.type === "mock-interview").length;
-    const students = new Set(assessments.flatMap((a) => a.results.map((r) => r.studentId)));
+    const evaluated = assessments.reduce((sum, assessment) => sum + (assessment.evaluatedCount ?? assessment.results.length), 0);
     return [
       { label: "Total assessments", value: assessments.length, icon: ClipboardList, hint: "Across all batches" },
       { label: "Exams", value: exams, icon: FileCode2, hint: "Contests and weekly tests" },
       { label: "Mock interviews", value: mocks, icon: MessagesSquare, hint: "Technical and HR rounds" },
-      { label: "Students evaluated", value: students.size, icon: UsersRound, hint: "Unique across assessments" },
+      { label: "Students evaluated", value: evaluated, icon: UsersRound, hint: "Across all assessments" },
     ];
   }, [assessments]);
 
@@ -96,7 +100,7 @@ export default function AssessmentsPage() {
       (a) =>
         (!q || a.name.toLowerCase().includes(q)) &&
         (typeFilter === "all" || a.type === typeFilter) &&
-        (batchFilter === "all" || a.batch === batchFilter) &&
+        (batchFilter === "all" || a.batch === batchFilter || (a as { batchId?: string }).batchId === batchFilter) &&
         (monthFilter === "all" || a.date.slice(0, 7) === monthFilter),
     );
   }, [assessments, query, typeFilter, batchFilter, monthFilter]);
@@ -136,8 +140,12 @@ export default function AssessmentsPage() {
 
   /* keep the open dialog in sync with store updates (e.g. mark reviewed) */
   const current = useMemo(
-    () => (selected ? assessments.find((a) => a.id === selected.id) ?? selected : null),
-    [selected, assessments],
+    () => {
+      if (!selectedDetails) return null;
+      const listItem = assessments.find((a) => a.id === selectedDetails.id);
+      return { ...selectedDetails, reviewed: listItem?.reviewed ?? selectedDetails.reviewed };
+    },
+    [selectedDetails, assessments],
   );
   const source =
     current?.sourceId !== undefined
@@ -150,6 +158,30 @@ export default function AssessmentsPage() {
       title: "Assessment reviewed",
       description: `“${a.name}” results are approved and now count towards student profiles.`,
     });
+  };
+
+  const openDetails = async (assessment: Assessment) => {
+    setSelected(assessment);
+    setSelectedDetails(null);
+    setDetailsLoading(true);
+    try {
+      const details = await api.assessment(assessment.id);
+      // The API returns uploader metadata for assessment details; the page model
+      // renders a display string, as it does for the assessment listing.
+      const uploader = details.uploadedBy as unknown;
+      setSelectedDetails({
+        ...details,
+        uploadedBy:
+          typeof uploader === "object" && uploader !== null && "name" in uploader
+            ? String((uploader as { name?: unknown }).name ?? "Trainer")
+            : String(uploader ?? "Trainer"),
+      });
+    } catch (error) {
+      toast({ title: "Unable to load assessment details", description: error instanceof Error ? error.message : "Please try again.", variant: "destructive" });
+      setSelected(null);
+    } finally {
+      setDetailsLoading(false);
+    }
   };
 
   return (
@@ -206,7 +238,7 @@ export default function AssessmentsPage() {
               ariaLabel="Filter by batch"
               value={batchFilter}
               onChange={onBatchChange}
-              options={BATCHES.map((b) => ({ label: b.name, value: b.name }))}
+              options={batches.map((b) => ({ label: b.name, value: b.name }))}
               allLabel="All batches"
               className="sm:w-44"
             />
@@ -279,10 +311,9 @@ export default function AssessmentsPage() {
                 <tbody>
                   {rows.map((a) => {
                     const Icon = TYPE_META[a.type].icon;
-                    const avg =
-                      a.results.length > 0
-                        ? a.results.reduce((sum, r) => sum + r.percentage, 0) / a.results.length
-                        : 0;
+                    const avg = a.averageScore ?? (a.results.length > 0
+                      ? a.results.reduce((sum, r) => sum + r.percentage, 0) / a.results.length
+                      : 0);
                     return (
                       <tr key={a.id} className="border-b border-border/50 transition-colors last:border-0 hover:bg-muted/60">
                         <td className="py-2.5 pl-5 pr-2">
@@ -300,7 +331,7 @@ export default function AssessmentsPage() {
                         </td>
                         <td className="px-2 py-2.5 text-[13px] text-foreground">{a.batch}</td>
                         <td className="px-2 py-2.5 text-[13px] text-muted-foreground">{formatDate(a.date)}</td>
-                        <td className="tabular px-2 py-2.5 text-[13px] text-foreground">{a.results.length}</td>
+                        <td className="tabular px-2 py-2.5 text-[13px] text-foreground">{a.evaluatedCount ?? a.results.length}</td>
                         <td className="px-2 py-2.5">
                           <MiniBar value={avg} width={52} />
                         </td>
@@ -318,7 +349,7 @@ export default function AssessmentsPage() {
                               variant="ghost"
                               size="sm"
                               className="h-8 gap-1.5 px-2 text-[13px] text-primary"
-                              onClick={() => setSelected(a)}
+                              onClick={() => void openDetails(a)}
                             >
                               <Eye className="size-3.5" /> View details
                             </Button>
@@ -351,9 +382,13 @@ export default function AssessmentsPage() {
       </Card>
 
       {/* --------------------------- details dialog --------------------------- */}
-      {current && (
-        <Dialog open onOpenChange={(open) => !open && setSelected(null)}>
+      {selected && (
+        <Dialog open onOpenChange={(open) => !open && (setSelected(null), setSelectedDetails(null))}>
           <DialogContent className="max-w-2xl gap-0 overflow-hidden p-0">
+            {detailsLoading || !current ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Loading assessment details…</div>
+            ) : (
+              <>
             <DialogHeader className="border-b border-border/70 px-5 py-4">
               <DialogTitle className="flex items-center gap-2.5 text-base">
                 <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
@@ -397,17 +432,25 @@ export default function AssessmentsPage() {
                   {[...current.results]
                     .sort((a, b) => b.percentage - a.percentage)
                     .map((r) => {
-                      const student = STUDENT_BY_ID[r.studentId];
+                      const matched = students.find((s) => s.id === r.studentId);
+                      const displayName =
+                        r.studentName && r.studentName !== r.studentId
+                          ? r.studentName
+                          : (matched?.name ?? "Student");
+                      const rollNumber =
+                        r.rollNumber && r.rollNumber !== r.studentId
+                          ? r.rollNumber
+                          : (matched?.rollNumber ?? "—");
                       return (
                         <tr key={r.studentId} className="border-b border-border/50 last:border-0 hover:bg-muted/60">
                           <td className="py-2.5 pl-5 pr-2">
                             <span className="flex items-center gap-2.5">
-                              <UserAvatar name={student?.name ?? r.studentId} size="sm" />
-                              <span className="font-medium text-foreground">{student?.name ?? r.studentId}</span>
+                              <UserAvatar name={displayName} size="sm" />
+                              <span className="font-medium text-foreground">{displayName}</span>
                             </span>
                           </td>
                           <td className="tabular px-2 py-2.5 text-[13px] text-muted-foreground">
-                            {student?.rollNumber ?? "—"}
+                            {rollNumber}
                           </td>
                           <td className="tabular px-2 py-2.5 text-[13px] text-foreground">
                             {r.marks}/{r.maxMarks}
@@ -432,6 +475,8 @@ export default function AssessmentsPage() {
                   ) : null}
                 </p>
               </div>
+            )}
+              </>
             )}
           </DialogContent>
         </Dialog>
