@@ -35,10 +35,7 @@ import {
 import { useAppStore } from "@/lib/placepro/store";
 import {
   domainGroups,
-  domainScores,
-  skillDomain as getSkillDomain,
   skillEntries,
-  skillName,
   studentDomainScore,
 } from "@/lib/placepro/skill-taxonomy";
 import { api, type StudentAssessment, type StudentProject } from "@/lib/placepro/api";

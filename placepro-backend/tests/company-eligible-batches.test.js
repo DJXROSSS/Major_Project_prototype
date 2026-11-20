@@ -17,6 +17,7 @@ test('company eligibility uses persisted, admin-controlled batch IDs', async t =
     // Fresh-table definitions precede the legacy upgrade section (which contains pre-existing malformed DO delimiters).
     const baseSchema = fs.readFileSync(path.join(__dirname, '../sql/schema.updated.sql'), 'utf8').split('-- Migrate legacy enum-backed skills')[0];
     await client.query(baseSchema);
+    await client.query(fs.readFileSync(path.join(__dirname, '../sql/migrations/20261121_batch_archive_metadata.sql'), 'utf8'));
     const migration = fs.readFileSync(path.join(__dirname, '../sql/migrations/20261119_company_eligible_batches.sql'), 'utf8');
     await client.query(migration);
     await client.query(migration);
@@ -115,6 +116,9 @@ test('company eligibility uses persisted, admin-controlled batch IDs', async t =
       for (const patch of [{ minCgpa: 11 }, { criteria: [{ ...profile.criteria[0], weightage: -1 }] }, { criteria: [profile.criteria[0], profile.criteria[0]] }]) {
         assert.equal((await request(`/companies/${id}`, 1, 'PATCH', patch)).status, 400);
       }
+      await client.query(`UPDATE academic_batches SET status='archived' WHERE academic_batch_id=4`);
+      assert.equal((await request(`/companies/${id}`, 1, 'PATCH', { eligibleBatchIds: ['4'] })).status, 400);
+      await client.query(`UPDATE academic_batches SET status='active' WHERE academic_batch_id=4`);
       const saved = (await request(`/companies/${id}`)).body;
       assert.equal(saved.name, profile.name); assert.deepEqual(saved.eligibleBatchIds, ['4']);
       assert.deepEqual(saved.criteria, profile.criteria);

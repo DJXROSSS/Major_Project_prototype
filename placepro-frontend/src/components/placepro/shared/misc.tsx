@@ -65,7 +65,7 @@ export function TablePagination({
   className?: string;
 }) {
   if (pageCount <= 1) return null;
-  const from = (page - 1) * Math.ceil(total / pageCount) + 1;
+
   return (
     <div className={cn("flex items-center justify-between gap-4 border-t border-border px-4 py-2.5", className)}>
       <p className="text-xs text-muted-foreground">

@@ -1,4 +1,4 @@
-//proxy.middleware is usually used for creating middleware that forwards (proxies) requests from one server to another.
+
 const http = require("http");
 const https = require("https");
 const { logger } = require("../utils/logger");

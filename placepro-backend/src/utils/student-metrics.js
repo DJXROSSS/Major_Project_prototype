@@ -1,3 +1,15 @@
+async function findStudentId(db, user) {
+  const { rows } = await db.query(
+    `SELECT student_id
+     FROM students
+     WHERE user_id = $1 OR (user_id IS NULL AND email = $2)
+     ORDER BY (user_id = $1) DESC
+     LIMIT 1`,
+    [user.id, user.email]
+  );
+  return rows.length ? String(rows[0].student_id) : null;
+}
+
 const PR_THRESHOLDS = {
   minAverage: 68,
   minCgpa: 6.6,
@@ -125,9 +137,10 @@ async function buildStudentResponseObject(db, studentRow) {
     rollNumber: studentRow.roll_no,
     name: studentRow.full_name,
     email: studentRow.email,
+    mobileNumber: studentRow.mobile_number ?? "",
     batchId: studentRow.academic_batch_id ? String(studentRow.academic_batch_id) : studentRow.batch,
     batch: studentRow.batch,
-    section: studentRow.section || "A",
+    section: studentRow.section ?? "",
     cgpa: Number(studentRow.cgpa),
     scores,
     domainAverages,
@@ -140,6 +153,7 @@ async function buildStudentResponseObject(db, studentRow) {
 }
 
 module.exports = {
+  findStudentId,
   PR_THRESHOLDS,
   getStudentProjectScore,
   recomputeAndSyncStudentReadiness,

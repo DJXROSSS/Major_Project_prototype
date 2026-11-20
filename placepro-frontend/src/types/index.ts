@@ -37,6 +37,7 @@ export interface Skill {
 }
 
 export interface Student {
+  mobileNumber?: string;
   batchId?: string;
   id: string;
   rollNumber: string;
@@ -134,6 +135,8 @@ export interface Company {
 }
 
 export interface AppUser {
+  mobileNumber?: string;
+  assignedBatches?: { id: string; name: string }[];
   id: string;
   name: string;
   email: string;
@@ -149,8 +152,17 @@ export interface Batch {
   academicYears: string;
   sections: string[];
   trainerIds: string[];
+  trainers: BatchTrainer[];
   studentCount: number;
   status: "active" | "archived";
+  archivedAt?: string | null;
+  archivedBy?: { id: string; name: string } | null;
+}
+
+export interface BatchTrainer {
+  id: string;
+  name: string;
+  status: "active" | "inactive";
 }
 
 export interface AuditLog {
@@ -213,6 +225,7 @@ export interface Route {
 }
 
 export interface SessionUser {
+  mustChangePassword?: boolean;
   id: string;
   name: string;
   email: string;

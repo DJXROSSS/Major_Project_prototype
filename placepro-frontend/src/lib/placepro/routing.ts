@@ -2,7 +2,7 @@ import type { Page, Role, Route } from "@/types";
 
 const pages: Record<Role, Page[]> = {
   trainer: ["dashboard", "students", "student-profile", "assessments", "import", "matching"],
-  admin: ["dashboard", "users", "batches", "skills", "domains", "companies", "audit"],
+  admin: ["dashboard", "students", "student-profile", "users", "batches", "skills", "domains", "companies", "audit"],
   student: ["dashboard", "my-performance", "my-feedback", "my-profile", "profile-intelligence"],
 };
 export function canVisit(role: Role, page: Page) { return pages[role].includes(page); }

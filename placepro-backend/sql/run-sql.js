@@ -5,11 +5,12 @@ const { Client } = require('pg');
 
 const files = [
     'schema.updated.sql',
+    'migrations/20261121_batch_archive_metadata.sql',
     'seed-demo-students.sql',
     'seed-supplied-cse-rosters.sql',
     'seed.sql',
 ];
-console.log(process.env.DB_PASSWORD);
+
 
 
 (async () => {

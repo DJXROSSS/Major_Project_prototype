@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, ClipboardCheck, X } from "lucide-react";
 import { api, type StudentVerificationRequest } from "@/lib/placepro/api";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,8 @@ export function StudentVerificationRequests() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const load = async () => { try { setItems(await api.studentVerificationRequests()); } catch (error) { toast({ title: "Could not load verification requests", description: error instanceof Error ? error.message : "Try refreshing.", variant: "destructive" }); } finally { setLoading(false); } };
-  useEffect(() => { void load(); }, []);
+  const load = useCallback(async () => { try { setItems(await api.studentVerificationRequests()); } catch (error) { toast({ title: "Could not load verification requests", description: error instanceof Error ? error.message : "Try refreshing.", variant: "destructive" }); } finally { setLoading(false); } }, [toast]);
+  useEffect(() => { void load(); }, [load]);
   const pending = items.filter((item) => item.status === "PENDING");
 
   async function approve() {

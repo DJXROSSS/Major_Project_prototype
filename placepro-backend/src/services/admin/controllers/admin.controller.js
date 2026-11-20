@@ -1,14 +1,103 @@
 const { Router } = require("express");
 const bcrypt = require("bcryptjs");
 const { pool, withTransaction, writeAuditLog } = require("../../../config/db");
-const { recomputeAndSyncStudentReadiness } = require("../../../utils/student-metrics");
+const { recomputeAndSyncStudentReadiness, buildStudentResponseObject } = require("../../../utils/student-metrics");
 const { requireAuth, requireRole } = require("../../../middleware/auth.middleware");
 
+const { registerAccount, findStudentByIdentity } = require("../../../utils/registration");
 const router = Router();
+const trainerIdsOf = (ids) => [...new Set((Array.isArray(ids) ? ids : []).map(String))];
+
+function validateBatchSections(value) {
+  if (!Array.isArray(value) || value.length > 1000) {
+    const error = new Error("Sections must be an array containing at most 1,000 names");
+    error.statusCode = 400; error.code = "VALIDATION"; throw error;
+  }
+  const sections = value.map((section) => typeof section === "string" ? section.trim() : "");
+  if (sections.some((section) => !section || section.length > 10)) {
+    const error = new Error("Each section name must contain 1-10 characters");
+    error.statusCode = 400; error.code = "VALIDATION"; throw error;
+  }
+  const normalized = sections.map((section) => section.toLocaleLowerCase());
+  if (new Set(normalized).size !== normalized.length) {
+    const error = new Error("Section names must be unique");
+    error.statusCode = 400; error.code = "VALIDATION"; throw error;
+  }
+  return sections;
+}
+
+async function trainerSummaries(ids, db = pool) {
+  const normalized = trainerIdsOf(ids);
+  if (!normalized.length) return [];
+  const { rows } = await db.query(
+    `SELECT user_id::text AS id, full_name AS name, status
+     FROM users WHERE role='TRAINER' AND user_id::text=ANY($1::text[])
+     ORDER BY user_id`,
+    [normalized]
+  );
+  return rows;
+}
+
+function batchDto(row, trainers) {
+  return {
+    id: String(row.academic_batch_id),
+    name: row.name,
+    department: row.department,
+    academicYears: row.academic_years,
+    sections: row.sections || [],
+    trainerIds: trainerIdsOf(row.trainer_ids),
+    trainers,
+    status: row.status,
+    studentCount: Number(row.student_count || 0),
+    archivedAt: row.archived_at ? new Date(row.archived_at).toISOString() : null,
+    archivedBy: row.archived_by ? { id: String(row.archived_by), name: row.archived_by_name || "Unknown administrator" } : null,
+  };
+}
+
+async function loadBatchDto(db, batchId) {
+  const { rows } = await db.query(
+    `SELECT ab.*, archiver.full_name AS archived_by_name,
+      (SELECT COUNT(*)::int FROM students s WHERE s.academic_batch_id=ab.academic_batch_id OR s.batch=ab.name) AS student_count
+     FROM academic_batches ab LEFT JOIN users archiver ON archiver.user_id=ab.archived_by
+     WHERE ab.academic_batch_id::text=$1`,
+    [batchId]
+  );
+  if (!rows.length) return null;
+  return batchDto(rows[0], await trainerSummaries(rows[0].trainer_ids, db));
+}
+
+async function validateTrainerIds(ids, existing = [], db = pool) {
+  if (!Array.isArray(ids) || ids.some(id => !["string", "number"].includes(typeof id) || !/^[1-9]\d*$/.test(String(id)) || BigInt(id) > 9223372036854775807n)) {
+    const error = new Error("Trainer assignments must contain valid user IDs");
+    error.statusCode = 400; throw error;
+  }
+  const normalized = trainerIdsOf(ids);
+  // Existing unresolved assignments are retained for explicit administrator review.
+  const added = normalized.filter(id => !existing.includes(id));
+  if (added.length) {
+    const { rows } = await db.query("SELECT user_id::text AS id FROM users WHERE user_id=ANY($1::bigint[]) AND role='TRAINER' AND status='active'", [added]);
+    if (rows.length !== added.length) {
+      const error = new Error("New assignments must reference existing active trainer accounts");
+      error.statusCode = 400; throw error;
+    }
+  }
+  return normalized;
+}
+router.use(require("../registration-imports").router);
+router.post("/users/trainers", requireAuth, requireRole(["admin"]), async (req, res, next) => {
+  try { res.status(201).json(await registerAccount(req.body, "TRAINER", req.user)); }
+  catch (error) { next(error); }
+});
 
 router.get("/users", requireAuth, requireRole(["admin"]), async (req, res, next) => {
   try {
     const { q = "", role, status, page = "1", pageSize = "10" } = req.query;
+    if (typeof q !== "string" || (role !== undefined && (typeof role !== "string" || !["admin", "trainer", "student"].includes(role.toLowerCase()))) ||
+        (status !== undefined && (typeof status !== "string" || !["active", "inactive"].includes(status))) ||
+        ![page, pageSize].every(value => typeof value === "string" && /^[1-9]\d*$/.test(value) && Number.isSafeInteger(Number(value))) ||
+        Number(page) > 2147483647 || Number(pageSize) > 1000) {
+      return res.status(400).json({ error: { code: "VALIDATION", message: "Invalid filters or pagination (pageSize must be 1–1000)" } });
+    }
     const conditions = ["(full_name ILIKE $1 OR email ILIKE $1)"];
     const params = [`%${q}%`];
 
@@ -21,14 +110,23 @@ router.get("/users", requireAuth, requireRole(["admin"]), async (req, res, next)
       conditions.push(`status = $${params.length}::account_status`);
     }
 
-    const p = Math.max(1, parseInt(page, 10));
-    const ps = Math.max(1, parseInt(pageSize, 10));
+    const p = Number(page);
+    const ps = Number(pageSize);
+    const count = await pool.query(`SELECT COUNT(*)::int AS total FROM users WHERE ${conditions.join(" AND ")}`, params);
+    const total = count.rows[0].total;
+    const offset = (p - 1) * ps;
+    if (offset >= total) {
+      return res.json({ items: [], page: p, pageSize: ps, total });
+    }
 
     const { rows } = await pool.query(
-      `SELECT *, COUNT(*) OVER() AS total_count FROM users
+      `SELECT *, (SELECT batch FROM students WHERE user_id=users.user_id) AS student_batch,
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('id', b.academic_batch_id::text, 'name', b.name) ORDER BY b.name)
+         FROM academic_batches b WHERE b.trainer_ids @> to_jsonb(ARRAY[users.user_id::text]) OR b.trainer_ids @> to_jsonb(ARRAY[users.user_id])), '[]'::jsonb) AS assigned_batches
+       FROM users
        WHERE ${conditions.join(" AND ")}
-       ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, ps, (p - 1) * ps]
+       ORDER BY created_at DESC, user_id DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, ps, offset]
     );
 
     res.json({
@@ -38,10 +136,13 @@ router.get("/users", requireAuth, requireRole(["admin"]), async (req, res, next)
         email: u.email,
         role: String(u.role).toLowerCase(),
         status: u.status,
+        mobileNumber: u.mobile_number ?? "",
+        assignedBatches: u.assigned_batches ?? [],
+        batch: u.student_batch ?? undefined,
       })),
       page: p,
       pageSize: ps,
-      total: rows.length ? Number(rows[0].total_count) : 0,
+      total,
     });
   } catch (err) {
     next(err);
@@ -51,11 +152,16 @@ router.get("/users", requireAuth, requireRole(["admin"]), async (req, res, next)
 router.post("/users", requireAuth, requireRole(["admin"]), async (req, res, next) => {
   try {
     const { name, email, role = "trainer", status = "active" } = req.body;
-    const defaultHash = await bcrypt.hash("secret", 10);
+    if (role === "trainer") return res.status(201).json(await registerAccount(req.body, "TRAINER", req.user));
+    if (role === "student") return res.status(201).json(await registerAccount(req.body, "STUDENT", req.user));
+    if (role !== "admin") return res.status(400).json({ error: { code: "VALIDATION", message: "Invalid role" } });
+    const { normalizeMobile } = require("../../../utils/registration");
+    const mobile = normalizeMobile(req.body.mobileNumber);
+    const defaultHash = await bcrypt.hash(mobile, 12);
     const { rows } = await pool.query(
-      `INSERT INTO users (full_name, email, password_hash, role, status)
-       VALUES ($1, $2, $3, $4::user_role, $5::account_status) RETURNING *`,
-      [name, email, defaultHash, String(role).toUpperCase(), status]
+      `INSERT INTO users (full_name, email, password_hash, role, status, mobile_number, must_change_password)
+       VALUES ($1, $2, $3, $4::user_role, $5::account_status, $6, TRUE) RETURNING *`,
+      [name, email.trim().toLowerCase(), defaultHash, String(role).toUpperCase(), status, mobile]
     );
     const u = rows[0];
     await writeAuditLog(req.user.id, req.user.name, "Users", `Created user ${email} (${role})`);
@@ -103,26 +209,30 @@ router.patch("/users/:userId", requireAuth, requireRole(["admin"]), async (req, 
 
 router.get("/batches", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
   try {
+    const status = req.query.status === undefined ? "active" : req.query.status;
+    if (typeof status !== "string" || !["active", "archived"].includes(status)) {
+      return res.status(400).json({ error: { code: "VALIDATION", message: "Status must be active or archived" } });
+    }
+    const params = [status];
+    const conditions = ["ab.status=$1::batch_status"];
+    if (req.user.role === "trainer") {
+      params.push(String(req.user.id));
+      conditions.push(`EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(ab.trainer_ids)='array' THEN ab.trainer_ids ELSE '[]'::jsonb END) trainer_id WHERE trainer_id=$2)`);
+    }
     const { rows } = await pool.query(
-      `SELECT ab.*, COUNT(s.student_id)::int AS student_count
+      `SELECT ab.*, archiver.full_name AS archived_by_name, COUNT(s.student_id)::int AS student_count,
+       COALESCE((SELECT jsonb_agg(jsonb_build_object('id', u.user_id::text, 'name', u.full_name, 'status', u.status) ORDER BY u.user_id)
+         FROM users u WHERE u.role='TRAINER' AND u.user_id::text IN
+         (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(ab.trainer_ids)='array' THEN ab.trainer_ids ELSE '[]'::jsonb END))), '[]'::jsonb) AS trainers
        FROM academic_batches ab
+       LEFT JOIN users archiver ON archiver.user_id=ab.archived_by
        LEFT JOIN students s ON s.academic_batch_id = ab.academic_batch_id OR s.batch = ab.name
-       GROUP BY ab.academic_batch_id
-       ORDER BY ab.created_at DESC`
+       WHERE ${conditions.join(" AND ")}
+       GROUP BY ab.academic_batch_id, archiver.full_name
+       ORDER BY ab.created_at DESC`,
+      params
     );
-
-    res.json(
-      rows.map((b) => ({
-        id: String(b.academic_batch_id),
-        name: b.name,
-        department: b.department,
-        academicYears: b.academic_years,
-        sections: b.sections || ["A", "B"],
-        trainerIds: b.trainer_ids || [],
-        status: b.status,
-        studentCount: b.student_count,
-      }))
-    );
+    res.json(rows.map((b) => batchDto(b, b.trainers)));
   } catch (err) {
     next(err);
   }
@@ -130,11 +240,13 @@ router.get("/batches", requireAuth, requireRole(["admin", "trainer"]), async (re
 
 router.post("/batches", requireAuth, requireRole(["admin"]), async (req, res, next) => {
   try {
-    const { name, department, academicYears, sections = ["A", "B"], trainerIds = [], status = "active" } = req.body;
+    const { name, department, academicYears, sections = ["A", "B"], trainerIds = [] } = req.body;
+    const normalizedTrainerIds = await validateTrainerIds(trainerIds);
+    const normalizedSections = validateBatchSections(sections);
     const { rows } = await pool.query(
       `INSERT INTO academic_batches (name, department, academic_years, sections, trainer_ids, status)
        VALUES ($1, $2, $3, $4, $5, $6::batch_status) RETURNING *`,
-      [name, department, academicYears, JSON.stringify(sections), JSON.stringify(trainerIds), status]
+      [name, department, academicYears, JSON.stringify(normalizedSections), JSON.stringify(normalizedTrainerIds), "active"]
     );
     const b = rows[0];
 
@@ -144,7 +256,8 @@ router.post("/batches", requireAuth, requireRole(["admin"]), async (req, res, ne
       department: b.department,
       academicYears: b.academic_years,
       sections: b.sections,
-      trainerIds: b.trainer_ids,
+      trainerIds: trainerIdsOf(b.trainer_ids),
+      trainers: await trainerSummaries(b.trainer_ids),
       status: b.status,
       studentCount: 0,
     });
@@ -156,67 +269,224 @@ router.post("/batches", requireAuth, requireRole(["admin"]), async (req, res, ne
 router.patch("/batches/:batchId", requireAuth, requireRole(["admin"]), async (req, res, next) => {
   try {
     const { name, department, academicYears, sections, trainerIds, status } = req.body;
-    const { rows } = await pool.query(
-      `UPDATE academic_batches
-       SET name = COALESCE($1, name),
-           department = COALESCE($2, department),
-           academic_years = COALESCE($3, academic_years),
-           sections = COALESCE($4, sections),
-           trainer_ids = COALESCE($5, trainer_ids),
-           status = COALESCE($6::batch_status, status)
-       WHERE academic_batch_id = $7 RETURNING *`,
-      [
-        name,
-        department,
-        academicYears,
-        sections ? JSON.stringify(sections) : null,
-        trainerIds ? JSON.stringify(trainerIds) : null,
-        status,
-        req.params.batchId,
-      ]
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({ error: { code: "NOT_FOUND", message: "Batch not found" } });
+    if (status !== undefined) {
+      return res.status(400).json({ error: { code: "VALIDATION", message: "Use the archive or restore action to change batch status" } });
     }
-
-    const b = rows[0];
+    const saved = await withTransaction(async (client) => {
+      const current = await client.query(
+        "SELECT * FROM academic_batches WHERE academic_batch_id=$1 FOR UPDATE",
+        [req.params.batchId]
+      );
+      if (!current.rows.length) return null;
+      const batch = current.rows[0];
+      if (batch.status === "archived") {
+        const error = new Error("Restore this batch before editing it"); error.statusCode = 409; error.code = "BATCH_ARCHIVED"; throw error;
+      }
+      const normalizedTrainerIds = trainerIds === undefined
+        ? undefined
+        : await validateTrainerIds(trainerIds, trainerIdsOf(batch.trainer_ids), client);
+      let normalizedSections;
+      if (sections !== undefined) {
+        normalizedSections = validateBatchSections(sections);
+        const nextNames = new Set(normalizedSections.map((section) => section.toLocaleLowerCase()));
+        const removed = validateBatchSections(batch.sections ?? []).filter(
+          (section) => !nextNames.has(section.toLocaleLowerCase())
+        );
+        if (removed.length) {
+          const referenced = await client.query(
+            `SELECT section, COUNT(*)::int AS count FROM students
+             WHERE (academic_batch_id=$1 OR batch=$2) AND section=ANY($3::text[])
+             GROUP BY section ORDER BY section`,
+            [batch.academic_batch_id, batch.name, removed]
+          );
+          if (referenced.rows.length) {
+            const details = referenced.rows.map((row) => ({
+              field: "section", section: row.section, count: row.count, batchId: String(batch.academic_batch_id),
+              message: `Cannot delete Section ${row.section} because ${row.count} student${row.count === 1 ? " is" : "s are"} currently assigned to it. Transfer or unassign them first.`,
+            }));
+            const error = new Error(details.map((detail) => detail.message).join(" "));
+            error.statusCode = 409; error.code = "SECTIONS_IN_USE"; error.details = details; throw error;
+          }
+        }
+      }
+      const result = await client.query(
+        `UPDATE academic_batches SET name=COALESCE($1,name),department=COALESCE($2,department),
+         academic_years=COALESCE($3,academic_years),sections=COALESCE($4,sections),
+         trainer_ids=COALESCE($5,trainer_ids),status=COALESCE($6::batch_status,status)
+         WHERE academic_batch_id=$7 RETURNING *`,
+        [name, department, academicYears,
+          normalizedSections === undefined ? null : JSON.stringify(normalizedSections),
+          normalizedTrainerIds === undefined ? null : JSON.stringify(normalizedTrainerIds),
+          null, req.params.batchId]
+      );
+      const count = await client.query(
+        "SELECT COUNT(*)::int AS count FROM students WHERE academic_batch_id=$1 OR batch=$2",
+        [batch.academic_batch_id, batch.name]
+      );
+      return { batch: result.rows[0], studentCount: count.rows[0].count };
+    });
+    if (!saved) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Batch not found" } });
+    const b = saved.batch;
     res.json({
       id: String(b.academic_batch_id),
       name: b.name,
       department: b.department,
       academicYears: b.academic_years,
       sections: b.sections,
-      trainerIds: b.trainer_ids,
+      trainerIds: trainerIdsOf(b.trainer_ids),
+      trainers: await trainerSummaries(b.trainer_ids),
       status: b.status,
+      studentCount: saved.studentCount,
     });
   } catch (err) {
     next(err);
   }
 });
 
+router.delete("/batches/:batchId", requireAuth, requireRole(["admin"]), async (req, res, next) => {
+  res.status(405).json({ error: { code: "BATCH_DELETION_DISABLED", message: "Permanent batch deletion is disabled. Archive the batch instead." } });
+});
+
+router.post("/batches/:batchId/archive", requireAuth, requireRole(["admin"]), async (req, res, next) => {
+  try {
+    const found = await withTransaction(async (client) => {
+      const { rows } = await client.query("SELECT * FROM academic_batches WHERE academic_batch_id=$1 FOR UPDATE", [req.params.batchId]);
+      if (!rows.length) return false;
+      if (rows[0].status === "archived") return true;
+      await client.query(
+        `UPDATE academic_batches SET status='archived',archived_at=CURRENT_TIMESTAMP,archived_by=$2 WHERE academic_batch_id=$1`,
+        [req.params.batchId, req.user.id]
+      );
+      await client.query(
+        `INSERT INTO audit_logs (actor_id,actor_name,module,action,status) VALUES ($1,$2,'Batches',$3,'success')`,
+        [req.user.id, req.user.name, `Archived batch ${rows[0].name} (${rows[0].academic_batch_id})`]
+      );
+      return true;
+    });
+    if (!found) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Batch not found" } });
+    res.json(await loadBatchDto(pool, req.params.batchId));
+  } catch (error) { next(error); }
+});
+
+router.post("/batches/:batchId/restore", requireAuth, requireRole(["admin"]), async (req, res, next) => {
+  try {
+    const found = await withTransaction(async (client) => {
+      const { rows } = await client.query("SELECT * FROM academic_batches WHERE academic_batch_id=$1 FOR UPDATE", [req.params.batchId]);
+      if (!rows.length) return false;
+      if (rows[0].status === "active") return true;
+      await client.query(
+        `UPDATE academic_batches SET status='active',archived_at=NULL,archived_by=NULL WHERE academic_batch_id=$1`,
+        [req.params.batchId]
+      );
+      await client.query(
+        `INSERT INTO audit_logs (actor_id,actor_name,module,action,status) VALUES ($1,$2,'Batches',$3,'success')`,
+        [req.user.id, req.user.name, `Restored batch ${rows[0].name} (${rows[0].academic_batch_id})`]
+      );
+      return true;
+    });
+    if (!found) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Batch not found" } });
+    res.json(await loadBatchDto(pool, req.params.batchId));
+  } catch (error) { next(error); }
+});
+
+router.post("/batches/:batchId/trainer-assignments/resolve", requireAuth, requireRole(["admin"]), async (req, res, next) => {
+  try {
+    const missingTrainerId = typeof req.body?.missingTrainerId === "string" || typeof req.body?.missingTrainerId === "number"
+      ? String(req.body.missingTrainerId) : "";
+    const action = req.body?.action;
+    const replacementTrainerId = req.body?.replacementTrainerId === undefined ? "" : String(req.body.replacementTrainerId);
+    if (!/^[1-9]\d*$/.test(missingTrainerId) || !["remove", "replace"].includes(action) ||
+        (action === "replace" && !/^[1-9]\d*$/.test(replacementTrainerId))) {
+      return res.status(400).json({ error: { code: "VALIDATION", message: "Provide a valid unresolved assignment action" } });
+    }
+    const result = await withTransaction(async (client) => {
+      const batchResult = await client.query("SELECT * FROM academic_batches WHERE academic_batch_id=$1 FOR UPDATE", [req.params.batchId]);
+      if (!batchResult.rows.length) return null;
+      const batch = batchResult.rows[0];
+      const current = trainerIdsOf(batch.trainer_ids);
+      if (!current.includes(missingTrainerId)) {
+        const error = new Error(`Trainer assignment ${missingTrainerId} is no longer present`); error.statusCode = 409; error.code = "ASSIGNMENT_CHANGED"; throw error;
+      }
+      const missingAccount = await client.query("SELECT 1 FROM users WHERE user_id=$1 AND role='TRAINER'", [missingTrainerId]);
+      if (missingAccount.rows.length) {
+        const error = new Error(`User ID ${missingTrainerId} is a valid trainer and cannot be resolved as missing`); error.statusCode = 409; error.code = "ASSIGNMENT_IS_VALID"; throw error;
+      }
+      let next;
+      let auditAction;
+      if (action === "remove") {
+        next = current.filter((id) => id !== missingTrainerId);
+        auditAction = `Removed unresolved trainer assignment ${missingTrainerId} from batch ${batch.name} (${batch.academic_batch_id})`;
+      } else {
+        const replacement = await client.query(
+          "SELECT user_id,full_name FROM users WHERE user_id=$1 AND role='TRAINER' AND status='active' FOR KEY SHARE",
+          [replacementTrainerId]
+        );
+        if (!replacement.rows.length) {
+          const error = new Error("Replacement must be an existing active trainer"); error.statusCode = 400; error.code = "INVALID_REPLACEMENT"; throw error;
+        }
+        if (current.includes(replacementTrainerId)) {
+          const error = new Error("Replacement trainer is already assigned to this batch"); error.statusCode = 409; error.code = "DUPLICATE_ASSIGNMENT"; throw error;
+        }
+        next = current.map((id) => id === missingTrainerId ? replacementTrainerId : id);
+        auditAction = `Replaced unresolved trainer assignment ${missingTrainerId} with ${replacement.rows[0].full_name} (${replacementTrainerId}) in batch ${batch.name} (${batch.academic_batch_id})`;
+      }
+      await client.query("UPDATE academic_batches SET trainer_ids=$2::jsonb WHERE academic_batch_id=$1", [batch.academic_batch_id, JSON.stringify(next)]);
+      await client.query(
+        `INSERT INTO audit_logs (actor_id,actor_name,module,action,status) VALUES ($1,$2,'Batches',$3,'success')`,
+        [req.user.id, req.user.name, auditAction]
+      );
+      return batch.academic_batch_id;
+    });
+    if (!result) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Batch not found" } });
+    res.json(await loadBatchDto(pool, String(result)));
+  } catch (error) { next(error); }
+});
+
 router.get("/batches/:batchId/stats", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
   try {
-    const { rows } = await pool.query(
-      `SELECT * FROM students WHERE CAST(academic_batch_id AS TEXT) = $1 OR batch = $1`,
-      [req.params.batchId]
+    const batchParams = [req.params.batchId];
+    const access = req.user.role === "trainer"
+      ? (batchParams.push(String(req.user.id)), ` AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(trainer_ids)='array' THEN trainer_ids ELSE '[]'::jsonb END) trainer_id WHERE trainer_id=$2)`)
+      : "";
+    const batch = await pool.query(
+      `SELECT academic_batch_id, name, sections FROM academic_batches WHERE academic_batch_id::text=$1${access}`,
+      batchParams
     );
-
-    const prCount = rows.filter((r) => r.readiness_status === "PR").length;
-    const avgCgpa = rows.length
-      ? Number((rows.reduce((a, r) => a + Number(r.cgpa), 0) / rows.length).toFixed(2))
-      : 0;
-
-    res.json({
-      batchId: req.params.batchId,
-      studentCount: rows.length,
-      prCount,
-      nprCount: rows.length - prCount,
-      averageCgpa: avgCgpa,
-    });
-  } catch (err) {
-    next(err);
-  }
+    if (!batch.rows.length) return res.status(404).json({ error: { code: "NOT_FOUND", message: "Batch not found" } });
+    const params = [String(batch.rows[0].academic_batch_id), batch.rows[0].name];
+    const population = "SELECT * FROM students WHERE academic_batch_id::text=$1 OR batch=$2";
+    const counts = await pool.query(`SELECT COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE readiness_status='PR')::int AS pr,
+      COUNT(*) FILTER (WHERE readiness_status='NPR')::int AS npr,
+      COALESCE(ROUND(AVG(cgpa),2),0)::float AS cgpa FROM (${population}) population`, params);
+    // Match the existing per-student domain mean, including zero for unscored students.
+    const domains = await pool.query(`WITH population AS (${population}),
+      skill_means AS (
+        SELECT sr.student_id, st.domain_id, st.skill_id, ROUND(AVG(sr.score_percentage),1) AS score
+        FROM skill_ratings sr JOIN population p ON p.student_id=sr.student_id
+        JOIN skill_taxonomy st ON st.skill_id=sr.skill_id AND st.deleted_at IS NULL
+        GROUP BY sr.student_id,st.domain_id,st.skill_id
+      ), domain_means AS (
+        SELECT student_id,domain_id,ROUND(AVG(score),1) AS score FROM skill_means GROUP BY student_id,domain_id
+      ) SELECT d.name AS label,
+        COALESCE(ROUND(SUM(m.score) / NULLIF((SELECT COUNT(*) FROM population),0),1),0)::float AS value
+      FROM evaluation_domains d LEFT JOIN domain_means m ON m.domain_id=d.domain_id
+      WHERE EXISTS (SELECT 1 FROM skill_taxonomy st WHERE st.domain_id=d.domain_id AND st.deleted_at IS NULL)
+      GROUP BY d.domain_id,d.name ORDER BY d.domain_id`, params);
+    const topRows = await pool.query(`SELECT * FROM (${population}) population ORDER BY average_score DESC, student_id DESC LIMIT 3`, params);
+    const top = await Promise.all(topRows.rows.map(row => buildStudentResponseObject(pool, row)));
+    const sectionCounts = await pool.query(
+      `SELECT configured.section, COUNT(s.student_id)::int AS count
+       FROM unnest($3::text[]) WITH ORDINALITY configured(section, position)
+       LEFT JOIN students s ON (s.academic_batch_id::text=$1 OR s.batch=$2) AND s.section=configured.section
+       GROUP BY configured.section, configured.position ORDER BY configured.position`,
+      [...params, batch.rows[0].sections || []]
+    );
+    const count = counts.rows[0];
+    res.json({ batchId: req.params.batchId, studentCount: count.total, prCount: count.pr,
+      nprCount: count.npr, averageCgpa: count.cgpa, domains: domains.rows, top,
+      sectionCounts: sectionCounts.rows });
+  } catch (err) { next(err); }
 });
 
 function validateDomain(req, res, next) {
@@ -328,17 +598,7 @@ router.get("/skills", requireAuth, requireRole(["admin", "trainer", "student"]),
     );
 
     res.json(
-      rows.map((s) => ({
-        id: s.skill_code || String(s.skill_id),
-        numericId: String(s.skill_id),
-        name: s.skill_name,
-        domain: s.domain_name,
-        domainId: String(s.domain_id),
-        description: s.description || "",
-        parameterType: s.parameter_type || "numeric",
-        active: Boolean(s.is_active),
-        defaultVisible: s.default_visible,
-      }))
+      rows.map(skill => ({ ...skillDto(skill), parameterType: skill.parameter_type || "numeric" }))
     );
   } catch (err) {
     next(err);
@@ -498,8 +758,6 @@ router.get("/audit-logs", requireAuth, requireRole(["admin"]), async (req, res, 
   }
 });
 
-
-//This endpoint doesn't required
 router.get("/import-student-reviews", requireAuth, requireRole(["admin"]), async (_req, res, next) => {
   try {
     const { rows } = await pool.query(
@@ -560,17 +818,16 @@ router.post("/import-student-reviews/:reviewId/approve", requireAuth, requireRol
         throw error;
       }
 
-      const duplicate = await client.query(
-        `SELECT student_id FROM students WHERE roll_no = $1 FOR UPDATE`,
-        [review.roll_no]
-      );
+      const existingStudent = await findStudentByIdentity(client, {
+        rollNumber: review.roll_no, name, email, academicBatchId: review.academic_batch_id,
+      });
 
       const batchRes = review.academic_batch_id
         ? await client.query(`SELECT name FROM academic_batches WHERE academic_batch_id = $1`, [review.academic_batch_id])
         : { rows: [] };
       const batchName = batchRes.rows[0]?.name || "Unassigned";
 
-      const studentRes = duplicate.rows.length
+      const studentRes = existingStudent
         ? null
         : await client.query(
             `INSERT INTO students
@@ -587,7 +844,7 @@ router.post("/import-student-reviews/:reviewId/approve", requireAuth, requireRol
             ]
           );
 
-      const studentId = duplicate.rows.length ? duplicate.rows[0].student_id : studentRes.rows[0].student_id;
+      const studentId = existingStudent ? existingStudent.student_id : studentRes.rows[0].student_id;
       const mapping = review.column_mapping_config || {};
       const skillColumns = mapping.skillColumns || [];
 
@@ -607,7 +864,7 @@ router.post("/import-student-reviews/:reviewId/approve", requireAuth, requireRol
 
         const score = Number(review.raw_row[review.headers[column.columnIndex]]);
         const maxMarks = Number(column.maxMarks);
-        if (!Number.isFinite(score) || score < 0 || score > maxMarks) {
+        if (!Number.isFinite(maxMarks) || maxMarks <= 0 || !Number.isFinite(score) || score < 0 || score > maxMarks) {
           throw new Error(`The saved score for '${review.headers[column.columnIndex]}' is invalid`);
         }
 

@@ -25,7 +25,7 @@ import {
   YAxis,
 } from "recharts";
 import { useAppStore } from "@/lib/placepro/store";
-import { domainScores, skillEntries, skillName } from "@/lib/placepro/skill-taxonomy";
+import { domainScores, skillEntries } from "@/lib/placepro/skill-taxonomy";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { ChartCard, EmptyState } from "@/components/placepro/shared/states";
 import { MiniBar, PRBadge, ScorePill } from "@/components/placepro/shared/badges";

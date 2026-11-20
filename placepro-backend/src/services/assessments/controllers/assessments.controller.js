@@ -6,6 +6,7 @@ const { recomputeAndSyncStudentReadiness } = require("../../../utils/student-met
 const { requireAuth, requireRole } = require("../../../middleware/auth.middleware");
 
 const router = Router();
+const trainerIdsOf = (value) => Array.isArray(value) ? value.map(String) : [];
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); //5mb
 
 router.get("/assessments", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
@@ -199,7 +200,17 @@ router.post("/assessment-imports/preview", requireAuth, requireRole(["admin", "t
     }
 
     const { name, type, batchId, date } = req.body;
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+    if (batchId) {
+      const batch = await pool.query(
+        `SELECT trainer_ids FROM academic_batches WHERE academic_batch_id::text=$1 AND status='active'`,
+        [String(batchId)]
+      );
+      if (!batch.rows.length) return res.status(400).json({ error: { code: "INVALID_BATCH", message: "Select an existing active batch" } });
+      if (req.user.role === "trainer" && !trainerIdsOf(batch.rows[0].trainer_ids).includes(String(req.user.id))) {
+        return res.status(403).json({ error: { code: "FORBIDDEN", message: "You can only create assessments for assigned batches" } });
+      }
+    }
+    const workbook = XLSX.read(req.file.buffer, { type: "buffer", raw: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
 
@@ -258,7 +269,15 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
     }
 
     const imp = batchRes.rows[0];
+    if (req.user.role !== 'admin' && String(imp.uploaded_by) !== String(req.user.id)) {
+      return res.status(403).json({ error: { code: 'FORBIDDEN', message: 'You can only confirm assessments you uploaded' } });
+    }
     const headers = imp.headers;
+    if (!Number.isInteger(rollNumberColumn) || rollNumberColumn < 0 || rollNumberColumn >= headers.length ||
+        !Array.isArray(skillColumns) || !skillColumns.length || skillColumns.some(column => !column ||
+          !Number.isInteger(column.columnIndex) || !Number.isFinite(column.maxMarks) || column.maxMarks <= 0)) {
+      return res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Choose a roll-number column and valid skill columns with positive maximum marks' } });
+    }
     const dataRows = imp.raw_preview_rows;
 
     const skillRes = await pool.query(
@@ -282,6 +301,9 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
       }
     }
 
+    if (issues.length) {
+      return res.status(422).json({ error: { code: 'IMPORT_VALIDATION_FAILED', message: 'Spreadsheet contains validation errors', details: issues } });
+    }
     const studentRes = await pool.query(`SELECT student_id, roll_no FROM students`);
     const rollMap = new Map();
     for (const s of studentRes.rows) {

@@ -1,7 +1,7 @@
 const { Router } = require("express");
 const { pool, withTransaction } = require("../../../config/db");
-const { requireAuth, requireRole } = require("../../../middleware/auth.middleware");
-const { recomputeAndSyncStudentReadiness } = require("../../../utils/student-metrics");
+const { requireAuth, requireRole, requireStudentBatchAccess } = require("../../../middleware/auth.middleware");
+const { findStudentId, recomputeAndSyncStudentReadiness } = require("../../../utils/student-metrics");
 const { fetchGithubRepository } = require("../providers/github.provider");
 const { ProfileProviderError } = require("../providers/profile-provider-error");
 const {
@@ -47,18 +47,6 @@ function parseGithubRepositoryUrl(value) {
   return { owner, repository };
 }
 
-async function findStudentId(user) {
-  if (user.studentId) return user.studentId;
-  const { rows } = await pool.query(
-    `SELECT student_id
-     FROM students
-     WHERE user_id = $1 OR (user_id IS NULL AND email = $2)
-     ORDER BY (user_id = $1) DESC
-     LIMIT 1`,
-    [user.id, user.email]
-  );
-  return rows.length ? String(rows[0].student_id) : null;
-}
 
 async function readProjects(studentId) {
   const { rows } = await pool.query(
@@ -140,7 +128,7 @@ async function readProjects(studentId) {
 
 router.get("/me/projects", requireAuth, requireRole(["student"]), async (req, res, next) => {
   try {
-    const studentId = await findStudentId(req.user);
+    const studentId = req.user.studentId || await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -161,7 +149,7 @@ router.post("/me/projects", requireAuth, requireRole(["student"]), async (req, r
         },
       });
     }
-    const studentId = await findStudentId(req.user);
+    const studentId = req.user.studentId || await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -303,7 +291,7 @@ router.post("/me/projects", requireAuth, requireRole(["student"]), async (req, r
   }
 });
 
-router.get("/students/:studentId/projects", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
+router.get("/students/:studentId/projects", requireAuth, requireRole(["admin", "trainer"]), requireStudentBatchAccess, async (req, res, next) => {
   try {
     if (!validId(req.params.studentId)) {
       return res.status(400).json({ error: { code: "INVALID_STUDENT_ID", message: "Student ID must be a positive integer" } });
@@ -318,7 +306,7 @@ router.get("/students/:studentId/projects", requireAuth, requireRole(["admin", "
   }
 });
 
-router.post("/students/:studentId/projects/:projectId/reviews", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
+router.post("/students/:studentId/projects/:projectId/reviews", requireAuth, requireRole(["admin", "trainer"]), requireStudentBatchAccess, async (req, res, next) => {
   try {
     if (!validId(req.params.studentId) || !validId(req.params.projectId)) {
       return res.status(400).json({ error: { code: "INVALID_ID", message: "Student and project IDs must be positive integers" } });

@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const { pool } = require("../../../config/db");
-const { requireAuth, requireRole } = require("../../../middleware/auth.middleware");
+const { requireAuth, requireRole, requireStudentBatchAccess } = require("../../../middleware/auth.middleware");
 const { fetchGithubStatistics } = require("../providers/github-statistics");
 const { ProfileProviderError } = require("../providers/profile-provider-error");
 const router = Router();
@@ -12,7 +12,7 @@ function isLegacyTokenCalendar(cached) {
     /calendar is not configured|needs? a .*github token/i.test(cached?.calendarUnavailable || "");
 }
 
-router.get("/students/:studentId/github-statistics", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
+router.get("/students/:studentId/github-statistics", requireAuth, requireRole(["admin", "trainer"]), requireStudentBatchAccess, async (req, res, next) => {
   res.set("Cache-Control", "private, no-store");
   try {
     const id = req.params.studentId;

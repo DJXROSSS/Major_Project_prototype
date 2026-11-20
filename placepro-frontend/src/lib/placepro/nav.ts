@@ -37,6 +37,7 @@ export const ROLE_NAV: Record<Role, NavItem[]> = {
     { label: "My Profile", page: "my-profile", icon: UserRound },
   ],
   admin: [
+    { label: "Students", page: "students", icon: UsersRound },
     { label: "Dashboard", page: "dashboard", icon: LayoutDashboard },
     { label: "Users", page: "users", icon: UsersRound },
     { label: "Batches", page: "batches", icon: GraduationCap },

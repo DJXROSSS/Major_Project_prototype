@@ -26,7 +26,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (typeof window !== "undefined" && window.innerWidth < 1024) {
       setSidebarPinned(false);
     }
-  }, []);
+  }, [setSidebarPinned]);
 
   const contentPad = pinned ? SIDEBAR_EXPANDED + SIDEBAR_OFFSET + 24 : SIDEBAR_COLLAPSED + SIDEBAR_OFFSET + 24;
 

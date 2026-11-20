@@ -160,8 +160,9 @@ export default function CompanyMatchingPage() {
   }, []);
 
   useEffect(() => {
+    const sequence = requestSequence;
     if (company?.id) void fetchMatches(company.id);
-    return () => { requestSequence.current++; };
+    return () => { sequence.current++; };
   }, [company, fetchMatches]);
 
   const handleSelectCompany = (id: string) => {

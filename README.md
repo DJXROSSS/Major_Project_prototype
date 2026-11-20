@@ -59,13 +59,20 @@ STUDENTS_SERVICE_PORT=4003
 ASSESSMENTS_SERVICE_PORT=4004
 COMPANIES_SERVICE_PORT=4005
 ADMIN_SERVICE_PORT=4006
-DATABASE_URL=postgresql://postgres:rudra%2300@localhost:5432/placepro
-JWT_SECRET=placepro-super-secret-key
+DATABASE_URL=postgresql://USER:PASSWORD@localhost:5432/placepro
+JWT_SECRET=replace-with-a-long-random-secret
 FRONTEND_URL=http://localhost:3000
 ```
 
 ### Frontend (`placepro-frontend/.env`)
 ```env
-DATABASE_URL=file:/home/z/my-project/db/custom.db
 NEXT_PUBLIC_API_URL=http://localhost:5000/api/v1
 ```
+
+## Checks and production build
+
+From `placepro-frontend`, run `npm run lint`, `npm run typecheck`, `npm test`, and `npm run build`. `npm start` serves the standalone build using Node on Windows or Linux.
+
+From `placepro-backend`, run `npm test` and `npm run build`. Tests require a local PostgreSQL connection from `.env` and create isolated temporary schemas; they do not reset the application database. Start all seven backend processes with `npm start`.
+
+For manual and bulk account registration, apply the additive migrations described in [registration setup](placepro-backend/sql/migrations/20261120_registration.md). Do not run seed scripts against an existing database as part of an upgrade.

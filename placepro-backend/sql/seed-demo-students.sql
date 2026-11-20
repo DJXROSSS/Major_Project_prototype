@@ -19,7 +19,7 @@ BEGIN
     FROM jsonb_array_elements(batch_specs)
   LOOP
     INSERT INTO academic_batches (name, department, academic_years, sections, trainer_ids, status)
-    VALUES (batch_record.name, 'Computer Science & Engineering', batch_record.years, '["A", "B"]'::jsonb, '[2]'::jsonb, 'active')
+    VALUES (batch_record.name, 'Computer Science & Engineering', batch_record.years, '["A", "B"]'::jsonb, '[]'::jsonb, 'active')
     ON CONFLICT (name) DO NOTHING;
 
     SELECT COUNT(*)::INT INTO current_count

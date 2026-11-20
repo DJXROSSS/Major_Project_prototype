@@ -66,7 +66,7 @@ export default function TrainerDashboard() {
   const dashboard = useAppStore((s) => s.dashboard);
   const isRefreshing = useAppStore((s) => s.isRefreshing);
 
-  const [selectedBatch, setSelectedBatch] = useState<string>("all");
+  const [selectedBatch] = useState<string>("all");
 
   const filteredStudents = useMemo(() => {
     if (selectedBatch === "all") return students;
@@ -91,9 +91,9 @@ export default function TrainerDashboard() {
       ? list.filter((s) => s.prStatus === "NPR").length
       : (dashboard?.nprCount ?? Math.max(0, totalStudents - prCount));
 
-    const batchAvg = list.length
-      ? Number((list.reduce((a, s) => a + s.average, 0) / list.length).toFixed(1))
-      : 0;
+    const batchAvg = isFiltered
+      ? (list.length ? Number((list.reduce((a, s) => a + s.average, 0) / list.length).toFixed(1)) : 0)
+      : (dashboard?.averageScore ?? 0);
 
     const top = isFiltered
       ? [...list].sort((a, b) => b.average - a.average).slice(0, 5)
@@ -153,9 +153,11 @@ export default function TrainerDashboard() {
   const domainBars = useMemo(() => {
     return domainGroups(skills).map((g) => ({
       domain: g.label,
-      score: domainAverage(filteredStudents, g.label, skills),
+      score: selectedBatch === "all"
+        ? (dashboard?.domainAverages?.[g.label] ?? domainAverage(filteredStudents, g.label, skills))
+        : domainAverage(filteredStudents, g.label, skills),
     }));
-  }, [skills, filteredStudents]);
+  }, [skills, filteredStudents, selectedBatch, dashboard?.domainAverages]);
 
   const recentActivity = useMemo(() => {
     return assessments.slice(0, 5).map((a) => ({
@@ -181,7 +183,7 @@ export default function TrainerDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={`${greeting}, ${user?.name.split(" ")[0] ?? "Trainer"}`}
+        title={`${greeting}, ${user?.name?.trim().split(/\s+/)[0] || "Trainer"}`}
         subtitle={
           batches.length > 0
             ? `Overview across ${batches.length} active cohorts and student readiness.`

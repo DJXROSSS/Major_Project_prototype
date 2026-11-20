@@ -16,7 +16,7 @@ Build with `npm run build`, then start the gateway and every service with `npm s
 
 ```
 src/
-  gateway/                 # public API gateway on port 4000
+  gateway/                 # public API gateway on port 5000
   services/
     auth/
       controllers/         # authentication HTTP handlers
@@ -51,7 +51,7 @@ All existing routes remain under `/api/v1`, including `/auth`, `/dashboard`, `/s
 | Companies | 4005 | `/api/v1/companies/*` |
 | Admin | 4006 | `/api/v1/users/*`, `/api/v1/batches/*`, `/api/v1/skills/*`, `/api/v1/audit-logs` |
 
-The gateway listens on port 4000 and keeps the original public URLs unchanged. Service URLs may be overridden with variables such as `AUTH_SERVICE_URL=http://auth:4001`, which makes the setup deployable in containers.
+The gateway listens on port 5000 and keeps the original public URLs unchanged. Service URLs may be overridden with variables such as `AUTH_SERVICE_URL=http://auth:4001`, which makes the setup deployable in containers.
 
 ## GitHub coding profiles
 

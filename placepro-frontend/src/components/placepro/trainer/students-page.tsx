@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { FileSpreadsheet, UsersRound } from "lucide-react";
+import { UsersRound } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/placepro/api";
@@ -9,6 +9,7 @@ import { useSubjectColumns } from "./use-subject-columns";
 import StudentFilterPanel from "./student-filter-panel";
 import { applyStudentFilters, readStudentFilters, studentFilterKeys, type StudentFilters } from "@/lib/placepro/student-filters";
 import type { Student } from "@/types";
+import RegistrationButton from "@/components/placepro/admin/registration-button";
 import { PageHeader } from "@/components/placepro/shared/page-header";
 import { MiniBar, PRBadge } from "@/components/placepro/shared/badges";
 import { SearchInput, type FilterOption } from "@/components/placepro/shared/controls";
@@ -17,6 +18,11 @@ import { TablePagination, UserAvatar } from "@/components/placepro/shared/misc";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useToast } from "@/hooks/use-toast";
 
 /* ------------------------------------------------------------------ */
 /* Trainer — Student Management listing                                */
@@ -35,6 +41,7 @@ const DEFAULT_SORT = "name-asc";
 const VALID_SORTS = new Set(SORT_OPTIONS.map(option => option.value));
 
 export default function StudentsPage() {
+  const user = useAppStore(s => s.user);
   const navigate = useAppStore((s) => s.navigate);
   const batches = useAppStore((s) => s.batches);
   const columns = useSubjectColumns();
@@ -56,6 +63,13 @@ export default function StudentsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editMode, setEditMode] = useState<"details" | "section">("details");
+  const [editForm, setEditForm] = useState({ name: "", email: "", mobileNumber: "", section: "", cgpa: "" });
+  const [mutationError, setMutationError] = useState("");
+  const [mutating, setMutating] = useState(false);
+  const [unassigningStudent, setUnassigningStudent] = useState<Student | null>(null);
+  const { toast } = useToast();
   const batchOptions = useMemo(() => batches.map(b => ({ label: b.name, value: b.name })), [batches]);
   const filters = readStudentFilters(new URLSearchParams(searchParams.toString()));
   const sectionOptions = useMemo<FilterOption[]>(() => [...new Set(batches.flatMap(b => b.sections))].sort().map(s => ({ label: `Section ${s}`, value: s })), [batches]);
@@ -99,28 +113,36 @@ export default function StudentsPage() {
   const pageRows = result.items;
   const currentPage = result.page;
   const pageCount = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+  const editBatch = editingStudent ? batches.find(item => item.id === editingStudent.batchId || item.name === editingStudent.batch) : undefined;
+  const openEditor = (student: Student, mode: "details" | "section") => {
+    setEditingStudent(student); setEditMode(mode); setMutationError("");
+    setEditForm({ name: student.name, email: student.email, mobileNumber: student.mobileNumber || "", section: student.section, cgpa: String(student.cgpa) });
+  };
+  const saveStudent = async () => {
+    if (!editingStudent || mutating) return;
+    setMutating(true); setMutationError("");
+    try {
+      await api.updateStudent(editingStudent.id, editMode === "section"
+        ? { section: editForm.section }
+        : { name: editForm.name, email: editForm.email, mobileNumber: editForm.mobileNumber, section: editForm.section, cgpa: Number(editForm.cgpa) });
+      setEditingStudent(null); setRetry(value => value + 1); await useAppStore.getState().refreshData();
+      toast({ title: editMode === "section" ? "Section updated" : "Student updated", description: `${editingStudent.name}'s record was saved.` });
+    } catch (error) { setMutationError(error instanceof Error ? error.message : "Unable to update student."); }
+    finally { setMutating(false); }
+  };
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Students"
         subtitle={`${result.total} matching students across ${batches.length} batches.`}
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1.5"
-            onClick={() => navigate("import")}
-          >
-            <FileSpreadsheet className="size-4" /> Import CSV
-          </Button>
-        }
+        actions={<RegistrationButton role="student" allowImport={user?.role === "admin"} onRegistered={email => { router.push(`${pathname}?q=${encodeURIComponent(email)}&sort=${sort}`); setRetry(value => value + 1); }} />}
       />
 
       <Card className="gap-0 border-border bg-card p-0 shadow-none">
         {/* filter toolbar */}
         <div className="flex flex-wrap items-center gap-3 border-b border-border/70 p-4 sm:p-5">
-          <SearchInput value={query} onChange={value => updateQuery("q", value)} placeholder="Search by name or roll number" className="min-w-[200px] flex-1 sm:max-w-md" />
+          <SearchInput value={query} onChange={value => updateQuery("q", value)} placeholder="Search by name, roll number or email" className="min-w-[200px] flex-1 sm:max-w-md" />
           <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             <Select value={sort} onValueChange={value => updateQuery("sort", value)}>
               <SelectTrigger aria-label="Sort students" className="h-9 w-[195px] text-sm">
@@ -161,7 +183,9 @@ export default function StudentsPage() {
                   <tr className="border-b border-border/70 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <th className="py-2.5 pl-5 pr-2">Student</th>
                     <th className="px-2 py-2.5">Roll No</th>
+                    <th className="px-2 py-2.5">Email</th><th className="px-2 py-2.5">Mobile</th>
                     <th className="px-2 py-2.5">Batch</th>
+                    <th className="px-2 py-2.5">Section</th>
                     <th className="px-2 py-2.5">CGPA</th>
                     {visible.map(subject => <th key={subject.id} className="whitespace-nowrap px-2 py-2.5">{subject.name}</th>)}
                     <th className="px-2 py-2.5">Average</th>
@@ -186,18 +210,20 @@ export default function StudentsPage() {
                         </span>
                       </td>
                       <td className="tabular px-2 py-2.5 text-[13px] text-muted-foreground">{r.rollNumber}</td>
+                      <td className="px-2 py-2.5">{r.email}</td><td className="px-2 py-2.5">{r.mobileNumber || "-"}</td>
                       <td className="px-2 py-2.5 text-[13px] text-muted-foreground">
                         <span className="whitespace-nowrap">
                           {r.batch.replace(" CSE", "")}
                           <span className="text-muted-foreground/70"> · {r.section}</span>
                         </span>
                       </td>
+                      <td className="px-2 py-2.5 text-[13px] text-muted-foreground">{r.section || "Unassigned"}</td>
                       <td className="tabular px-2 py-2.5 text-[13px] font-medium text-foreground">{r.cgpa.toFixed(1)}</td>
                       {visible.map(subject => <td key={subject.id} className="px-2 py-2.5">{r.scores[subject.id] === undefined ? <span className="text-muted-foreground">-</span> : <MiniBar value={r.scores[subject.id]} width={36} />}</td>)}
                       <td className="px-2 py-2.5"><MiniBar value={r.average} /></td>
                       <td className="px-2 py-2.5"><PRBadge status={r.prStatus} /></td>
                       <td className="py-2.5 pl-2 pr-5 text-right">
-                        <Button
+                        <div className="flex justify-end gap-1"><Button
                           variant="outline"
                           size="sm"
                           className="h-8 text-[13px]"
@@ -207,7 +233,9 @@ export default function StudentsPage() {
                           }}
                         >
                           View
-                        </Button>
+                        </Button><Button variant="outline" size="sm" className="h-8 text-[13px]" onClick={(e) => { e.stopPropagation(); openEditor(r, "details"); }}>Edit</Button>
+                        <Button variant="outline" size="sm" className="h-8 text-[13px]" onClick={(e) => { e.stopPropagation(); openEditor(r, "section"); }}>Change section</Button>
+                        <Button variant="outline" size="sm" className="h-8 text-[13px] text-danger" disabled={!r.section} onClick={(e) => { e.stopPropagation(); setMutationError(""); setUnassigningStudent(r); }}>Remove</Button></div>
                       </td>
                     </tr>
                   ))}
@@ -223,6 +251,33 @@ export default function StudentsPage() {
           </>
         )}
       </Card>
+      <Dialog open={editingStudent !== null} onOpenChange={(open) => { if (!open && !mutating) setEditingStudent(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>{editMode === "section" ? "Change section" : "Edit student"}</DialogTitle>
+            <DialogDescription>{editingStudent?.rollNumber} · {editingStudent?.batch}</DialogDescription></DialogHeader>
+          <div className="space-y-4">
+            {editMode === "details" ? <>
+              <div className="space-y-1"><Label htmlFor="student-name">Name</Label><Input id="student-name" value={editForm.name} maxLength={100} onChange={event => setEditForm(form => ({ ...form, name: event.target.value }))} /></div>
+              <div className="space-y-1"><Label htmlFor="student-email">Email</Label><Input id="student-email" type="email" value={editForm.email} maxLength={120} onChange={event => setEditForm(form => ({ ...form, email: event.target.value }))} /></div>
+              <div className="space-y-1"><Label htmlFor="student-mobile">Mobile</Label><Input id="student-mobile" value={editForm.mobileNumber} maxLength={20} onChange={event => setEditForm(form => ({ ...form, mobileNumber: event.target.value }))} /></div>
+              <div className="space-y-1"><Label htmlFor="student-cgpa">CGPA</Label><Input id="student-cgpa" type="number" min={0} max={10} step={0.01} value={editForm.cgpa} onChange={event => setEditForm(form => ({ ...form, cgpa: event.target.value }))} /></div>
+            </> : null}
+            <div className="space-y-1"><Label htmlFor="student-section">Section</Label><Select value={editForm.section} onValueChange={sectionValue => setEditForm(form => ({ ...form, section: sectionValue }))}>
+              <SelectTrigger id="student-section"><SelectValue placeholder="Select section" /></SelectTrigger><SelectContent>{editBatch?.sections.map(sectionValue => <SelectItem key={sectionValue} value={sectionValue}>{sectionValue}</SelectItem>)}</SelectContent>
+            </Select></div>
+            {mutationError ? <p role="alert" className="text-sm text-danger">{mutationError}</p> : null}
+          </div>
+          <DialogFooter><Button variant="outline" disabled={mutating} onClick={() => setEditingStudent(null)}>Cancel</Button><Button disabled={mutating || !editForm.section} onClick={() => void saveStudent()}>{mutating ? "Saving…" : "Save"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <AlertDialog open={unassigningStudent !== null} onOpenChange={(open) => { if (!open && !mutating) setUnassigningStudent(null); }}>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Remove student from section?</AlertDialogTitle><AlertDialogDescription>
+          {unassigningStudent?.name} will become unassigned. Their account, batch, assessments, scores, projects, and history will remain intact.
+        </AlertDialogDescription></AlertDialogHeader>
+          {mutationError ? <p role="alert" className="text-sm text-danger">{mutationError}</p> : null}
+          <AlertDialogFooter><AlertDialogCancel disabled={mutating}>Cancel</AlertDialogCancel><AlertDialogAction disabled={mutating} onClick={async event => { event.preventDefault(); if (!unassigningStudent) return; setMutating(true); setMutationError(""); try { await api.unassignStudentSection(unassigningStudent.id); toast({ title: "Section assignment removed" }); setUnassigningStudent(null); setRetry(value => value + 1); await useAppStore.getState().refreshData(); } catch (error) { setMutationError(error instanceof Error ? error.message : "Unable to remove section assignment."); } finally { setMutating(false); } }}>{mutating ? "Removing…" : "Remove from section"}</AlertDialogAction></AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

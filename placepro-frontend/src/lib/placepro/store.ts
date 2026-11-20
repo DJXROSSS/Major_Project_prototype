@@ -1,11 +1,9 @@
 "use client";
 
-/* ------------------------------------------------------------------ */
 /* PlacePro — application store                                        */
 /* Session, routing, sidebar state and all mutable domain collections  */
 /* (skills, companies, users, batches, imported assessments) live      */
 /* here so every portal shares one source of truth.                    */
-/* ------------------------------------------------------------------ */
 
 import { create } from "zustand";
 import type {
@@ -24,11 +22,6 @@ import type {
 import { api, ApiError } from "./api";
 import { canVisit, routeHref, pushNavigation } from "./routing";
 import { logger } from "@/lib/logger";
-
-export interface MatchableAssessment {
-  assessment: Assessment;
-  source: ImportedSource;
-}
 
 interface AppState {
   /* session */
@@ -77,7 +70,7 @@ interface AppState {
   addUser: (user: Omit<AppUser, "id"> | AppUser) => Promise<void>;
   updateUser: (id: string, patch: Partial<AppUser>) => Promise<void>;
 
-  addBatch: (batch: Omit<Batch, "id" | "studentCount"> | Batch) => Promise<void>;
+  addBatch: (batch: Omit<Batch, "id" | "studentCount" | "trainers"> | Batch) => Promise<void>;
   updateBatch: (id: string, patch: Partial<Batch>) => Promise<void>;
 
   importAssessment: (assessment: Assessment, source: ImportedSource) => void;
@@ -135,7 +128,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   refreshData: async () => {
     const user = useAppStore.getState().user;
-    if (!user) return;
+    if (!user || user.mustChangePassword) return;
     set({ isRefreshing: true, dataError: null });
     try {
       if (user.role === "student") {
@@ -148,6 +141,8 @@ export const useAppStore = create<AppState>((set) => ({
         set({ assessments, feedback, students: [student], skills, domains, auditLogs: [], dashboard: { role: "student" }, isRefreshing: false });
         return;
       }
+      // This is a bounded convenience snapshot. Listings and aggregate counts use
+      // their dedicated paginated/aggregate endpoints instead of treating it as complete.
       const needsRoster = typeof window === "undefined" || window.location.pathname !== "/trainer/students";
       const [studentsResponse, assessments, companies, batches, skills, dashboard, domains] = await Promise.all([
         needsRoster ? api.students() : Promise.resolve({ items: useAppStore.getState().students }), api.assessments(), api.companies(), api.batches(), api.skills(), api.dashboard(), api.domains(),
@@ -165,8 +160,8 @@ export const useAppStore = create<AppState>((set) => ({
       } else {
         set({ feedback: [], importedSources: [], assessments: normalizedAssessments, companies, batches, skills, domains, students: studentsResponse.items, auditLogs: [], dashboard, isRefreshing: false });
       }
-      // Keep the call here so all authorised data sources are exercised; student-dependent views fetch details by id.
-      void studentsResponse;
+
+
     } catch (error) {
       logger.error("data.refresh_failed", error, { role: user.role });
       set({ isRefreshing: false, dataError: error instanceof Error ? error.message : "Unable to load current data." });
@@ -194,10 +189,10 @@ export const useAppStore = create<AppState>((set) => ({
   deleteCompany: async (id) => { await api.deleteCompany(id); set((s) => ({ companies: s.companies.filter((c) => c.id !== id) })); },
 
   addUser: async (user) => { const created = await api.createUser(user); set((s) => ({ users: [created, ...s.users] })); },
-  updateUser: async (id, patch) => { const updated = await api.updateUser(id, patch); set((s) => ({ users: s.users.map((u) => u.id === id ? updated : u) })); },
+  updateUser: async (id, patch) => { const updated = await api.updateUser(id, patch); set((s) => ({ users: s.users.map((u) => u.id === id ? { ...u, ...updated } : u) })); },
 
-  addBatch: async (batch) => { const created = await api.createBatch(batch); set((s) => ({ batches: [created, ...s.batches] })); },
-  updateBatch: async (id, patch) => { const updated = await api.updateBatch(id, patch); set((s) => ({ batches: s.batches.map((b) => b.id === id ? { ...b, ...patch } : b) })); },
+  addBatch: async (batch) => { await api.createBatch(batch); const batches = await api.batches(); set({ batches }); },
+  updateBatch: async (id, patch) => { const updated = await api.updateBatch(id, patch); set((s) => ({ batches: s.batches.map((b) => b.id === id ? updated : b) })); },
 
   importAssessment: (assessment, source) =>
     set((s) => ({
@@ -217,11 +212,6 @@ export const useAppStore = create<AppState>((set) => ({
 }));
 
 /* ------------------------- selectors / helpers ------------------------- */
-
-export function getStudentSafely(studentId?: string) {
-  if (!studentId) return undefined;
-  return useAppStore.getState().students.find((student) => student.id === studentId);
-}
 
 /** Breadcrumb labels for the current route, per role */
 export function routeLabels(route: Route, role: SessionUser["role"]): string[] {
@@ -245,27 +235,4 @@ export function routeLabels(route: Route, role: SessionUser["role"]): string[] {
     audit: ["Administration", "Audit Logs"],
   };
   return map[page] ?? ["PlacePro"];
-}
-
-export function pageTitle(route: Route): string {
-  const { page } = route;
-  const map: Record<Page, string> = {
-    dashboard: "Dashboard",
-    students: "Students",
-    "student-profile": "Student Profile",
-    assessments: "Assessments",
-    import: "Import Results",
-    matching: "Company Matching",
-    "my-performance": "My Performance",
-    "my-feedback": "Interview Feedback",
-    "my-profile": "My Profile",
-    "profile-intelligence": "Profile Intelligence",
-    users: "User Management",
-    batches: "Batch Management",
-    skills: "Skills & Parameters",
-    domains: "Manage Domains",
-    companies: "Company Requirements",
-    audit: "Audit Logs",
-  };
-  return map[page] ?? "PlacePro";
 }

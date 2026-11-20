@@ -6,6 +6,8 @@ const { requireAuth, requireRole } = require("../../../middleware/auth.middlewar
 const { getGithubUser, fetchGithubSnapshot, API_VERSION: GITHUB_API_VERSION } = require("../providers/github.provider");
 const { ProfileProviderError, requestJson } = require("../providers/profile-provider-error");
 
+const { findStudentId } = require("../../../utils/student-metrics");
+
 const router = Router();
 const maxVerificationAttempts = 5;
 const challengeLifetimeMinutes = 30;
@@ -59,17 +61,6 @@ async function createChallenge(client, profileId) {
   return { token, instructions, expiresInMinutes: challengeLifetimeMinutes };
 }
 
-async function findStudentId(user) {
-  const { rows } = await pool.query(
-    `SELECT student_id
-     FROM students
-     WHERE user_id = $1 OR (user_id IS NULL AND email = $2)
-     ORDER BY (user_id = $1) DESC
-     LIMIT 1`,
-    [user.id, user.email]
-  );
-  return rows.length ? String(rows[0].student_id) : null;
-}
 
 function apiErrorStatus(error) {
   return error instanceof ProfileProviderError ? error.statusCode : error.statusCode || 500;
@@ -137,7 +128,7 @@ function encryptOAuthToken(token, key) {
 
 router.get("/me/profiles", requireAuth, requireRole(["student"]), async (req, res, next) => {
   try {
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -200,7 +191,7 @@ router.post("/me/profiles", requireAuth, requireRole(["student"]), async (req, r
       });
     }
 
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -240,7 +231,7 @@ router.patch("/me/profiles/:profileId", requireAuth, requireRole(["student"]), a
     if (!validProfileId(req.params.profileId)) {
       return res.status(400).json({ error: { code: "INVALID_PROFILE_ID", message: "Profile ID must be a positive integer" } });
     }
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -298,7 +289,7 @@ router.delete("/me/profiles/:profileId", requireAuth, requireRole(["student"]), 
     if (!validProfileId(req.params.profileId)) {
       return res.status(400).json({ error: { code: "INVALID_PROFILE_ID", message: "Profile ID must be a positive integer" } });
     }
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -321,7 +312,7 @@ router.post("/me/profiles/:profileId/verify", requireAuth, requireRole(["student
     if (!validProfileId(req.params.profileId)) {
       return res.status(400).json({ error: { code: "INVALID_PROFILE_ID", message: "Profile ID must be a positive integer" } });
     }
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -470,7 +461,7 @@ router.post("/me/profiles/:profileId/sync", requireAuth, requireRole(["student"]
     if (!validProfileId(req.params.profileId)) {
       return res.status(400).json({ error: { code: "INVALID_PROFILE_ID", message: "Profile ID must be a positive integer" } });
     }
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }
@@ -544,7 +535,7 @@ router.post("/me/profiles/github/oauth/start", requireAuth, requireRole(["studen
         error: { code: "OAUTH_NOT_CONFIGURED", message: "GitHub OAuth has not been configured" },
       });
     }
-    const studentId = await findStudentId(req.user);
+    const studentId = await findStudentId(pool, req.user);
     if (!studentId) {
       return res.status(404).json({ error: { code: "NOT_FOUND", message: "Student profile not linked" } });
     }

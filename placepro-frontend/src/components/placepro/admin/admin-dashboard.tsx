@@ -14,9 +14,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  Cell,
-  Pie,
-  PieChart,
   ResponsiveContainer,
   Tooltip as ReTooltip,
   XAxis,
@@ -53,9 +50,12 @@ export default function AdminDashboard() {
   const isRefreshing = useAppStore((s) => s.isRefreshing);
 
   const stats = useMemo(() => {
-    const trainers = users.filter((u) => u.role === "trainer").length;
-    const admins = users.filter((u) => u.role === "admin").length;
-    const studentUsers = users.filter((u) => u.role === "student").length;
+    const countRole = (role: string) => dashboard?.userCounts
+      ? dashboard.userCounts.filter((entry) => entry.role === role).reduce((sum, entry) => sum + entry.count, 0)
+      : users.filter((u) => u.role === role).length;
+    const trainers = countRole("trainer");
+    const admins = countRole("admin");
+    const studentUsers = countRole("student");
     const activeSkills = skills.filter((s) => s.active).length;
     const totalStudents = dashboard?.totalStudents ?? students.length;
     return { trainers, admins, studentUsers, activeSkills, totalStudents };

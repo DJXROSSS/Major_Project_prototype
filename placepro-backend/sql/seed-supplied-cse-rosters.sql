@@ -10,7 +10,7 @@ WITH supplied(years, roll_no, full_name) AS (
   FROM supplied
 ), inserted_batches AS (
   INSERT INTO academic_batches (name, department, academic_years, sections, trainer_ids, status)
-  SELECT years || ' CSE', 'Computer Science & Engineering', years, '["A", "B"]'::jsonb, '[2]'::jsonb, 'active'
+  SELECT years || ' CSE', 'Computer Science & Engineering', years, '["A", "B"]'::jsonb, '[]'::jsonb, 'active'
   FROM (SELECT DISTINCT years FROM numbered) AS batches
   ON CONFLICT (name) DO NOTHING
   RETURNING academic_batch_id, academic_years AS years

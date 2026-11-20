@@ -32,11 +32,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
 
-/* ------------------------------------------------------------------ */
+
 /* AppHeader — aligned with content, never overlaps the sidebar        */
-/* ------------------------------------------------------------------ */
 
 export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const user = useAppStore((s) => s.user);
@@ -100,8 +98,11 @@ export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav: () => void }) 
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="pp-focus ml-0.5 rounded-full" aria-label="Account menu">
+              <button type="button" className="pp-focus ml-0.5 flex items-center gap-2 rounded-lg text-left" aria-label={`Account menu for ${user.name}`}>
                 <UserAvatar name={user.name} />
+                <span className="max-w-24 truncate text-[13px] font-medium text-foreground sm:max-w-40" title={user.name}>
+                  {user.name}
+                </span>
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-60">
@@ -135,21 +136,15 @@ export function AppHeader({ onOpenMobileNav }: { onOpenMobileNav: () => void }) 
   );
 }
 
-/* ------------------------------------------------------------------ */
 /* Notifications                                                       */
-/* ------------------------------------------------------------------ */
 
 function NotificationBell() {
-  const [read, setRead] = useState(false);
-  const unread = 0;
   return (
     <Popover>
       <PopoverTrigger asChild>
         <Button variant="ghost" size="sm" className="relative h-9 w-9 p-0 text-muted-foreground" aria-label="Notifications">
           <Bell className="size-4" />
-          {unread > 0 ? (
-            <span className="absolute right-1.5 top-1.5 flex size-2 rounded-full bg-danger ring-2 ring-background" />
-          ) : null}
+
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
@@ -158,7 +153,7 @@ function NotificationBell() {
           <button
             type="button"
             className="text-xs font-medium text-primary hover:underline"
-            onClick={() => setRead(true)}
+            disabled
           >
             Mark all as read
           </button>
@@ -169,9 +164,7 @@ function NotificationBell() {
   );
 }
 
-/* ------------------------------------------------------------------ */
 /* Global search — role aware                                          */
-/* ------------------------------------------------------------------ */
 
 function SearchCommand({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   const user = useAppStore((s) => s.user);

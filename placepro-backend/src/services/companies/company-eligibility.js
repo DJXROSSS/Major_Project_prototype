@@ -21,8 +21,8 @@ async function validateBatchIds(db, ids) {
   if (!Array.isArray(ids) || !ids.length) invalid("Select at least one eligible batch");
   if (ids.some(id => !["string", "number"].includes(typeof id) || !/^[1-9]\d*$/.test(String(id)) || BigInt(id) > 9223372036854775807n)) invalid("Invalid eligible batch ID");
   const unique = [...new Set(ids.map(String))];
-  const { rows } = await db.query(`SELECT academic_batch_id FROM academic_batches WHERE academic_batch_id = ANY($1::bigint[]) FOR KEY SHARE`, [unique]);
-  if (rows.length !== unique.length) invalid("One or more eligible batches no longer exist");
+  const { rows } = await db.query(`SELECT academic_batch_id FROM academic_batches WHERE academic_batch_id = ANY($1::bigint[]) AND status='active' FOR KEY SHARE`, [unique]);
+  if (rows.length !== unique.length) invalid("One or more eligible batches are missing or archived");
   return unique;
 }
 
@@ -52,7 +52,8 @@ async function validateCriteria(db, cgpa, criteria) {
 
 // Filter by database batch IDs before loading scores. Three bulk queries, independent of student count.
 async function matchingStudents(db, batchIds) {
-  const { rows } = await db.query(`SELECT s.*, ab.name AS batch_name FROM students s
+  const { rows } = await db.query(`SELECT s.*, u.mobile_number, ab.name AS batch_name FROM students s
+    LEFT JOIN users u ON u.user_id=s.user_id
     JOIN academic_batches ab ON ab.academic_batch_id = s.academic_batch_id
     WHERE s.academic_batch_id = ANY($1::bigint[]) ORDER BY s.student_id`, [batchIds]);
   if (!rows.length) return [];
@@ -83,7 +84,7 @@ async function matchingStudents(db, batchIds) {
     const project = projectScores.get(String(s.student_id));
     return { id: String(s.student_id), name: s.full_name, rollNumber: s.roll_no, email: s.email,
       batchId: String(s.academic_batch_id), batch: s.batch_name, section: s.section ?? "",
-      mobileNumber: s.custom_profile_fields?.mobileNumber ?? s.custom_profile_fields?.mobile_number ?? "",
+      mobileNumber: s.mobile_number ?? s.custom_profile_fields?.mobileNumber ?? s.custom_profile_fields?.mobile_number ?? "",
       cgpa: Number(s.cgpa), scores: scores.get(String(s.student_id)) || {},
       average: Number(s.average_score), prStatus: s.readiness_status, trend: [],
       projectScore: project ? Number(project.project_score) : null, approvedProjectCount: project?.approved_count || 0,

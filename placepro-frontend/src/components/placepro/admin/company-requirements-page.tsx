@@ -172,7 +172,7 @@ export default function CompanyRequirementsPage() {
     if (!form.role.trim() || form.role.trim().length > 100) next.role = "Role is required (maximum 100 characters).";
     if (!form.eligibleBatchIds.length) next.batches = "Select at least one eligible batch.";
     if (form.eligibleBatchIds.some(id => !batches.some(b => b.id === id))) next.batches = "Remove unavailable batches and select an existing batch.";
-    if (!Number.isFinite(form.minCgpa) || form.minCgpa < 0 || form.minCgpa > 10) next.criteria = "CGPA must be between 0 and 10.";
+    // if (!Number.isFinite(form.minCgpa) || form.minCgpa < 0 || form.minCgpa > 10) next.criteria = "CGPA must be between 0 and 10.";
     if (form.criteria.some(c => !c.skillId || !Number.isFinite(c.minCutoff) || c.minCutoff < 0 || c.minCutoff > 100 || !Number.isFinite(c.weightage) || c.weightage < 0 || c.weightage > 100)) next.criteria = "Each cutoff and weight must be between 0 and 100.";
     if (new Set(form.criteria.map(c => c.skillId)).size !== form.criteria.length) next.criteria = "Select each skill or project-score criterion only once.";
     setErrors(next);

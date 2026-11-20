@@ -14,6 +14,7 @@ export function useSubjectColumns() {
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   useEffect(() => {
+    const requests = generation;
     let live = true;
     const load = async () => {
       if (busy.current) return;
@@ -31,7 +32,7 @@ export function useSubjectColumns() {
     };
     void load();
     window.addEventListener("focus", load);
-    return () => { live = false; generation.current++; window.removeEventListener("focus", load); };
+    return () => { live = false; requests.current++; window.removeEventListener("focus", load); };
   }, [reload]);
   const selected = (s: Skill) => columns?.[s.id] ?? s.defaultVisible ?? false;
   const visible = subjects.filter(selected);

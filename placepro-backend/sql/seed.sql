@@ -13,7 +13,8 @@ ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO academic_batches (name, department, academic_years, sections, trainer_ids, status)
 VALUES
-  ('2022–2026 CSE', 'Computer Science & Engineering', '2022 – 2026', '["A", "B"]'::jsonb, '[2]'::jsonb, 'active')
+  ('2022–2026 CSE', 'Computer Science & Engineering', '2022 – 2026', '["A", "B"]'::jsonb,
+   COALESCE((SELECT jsonb_agg(user_id::text) FROM users WHERE lower(email)='trainer@example.com' AND role='TRAINER'), '[]'::jsonb), 'active')
 ON CONFLICT (name) DO NOTHING;
 
 INSERT INTO students (user_id, academic_batch_id, roll_no, full_name, email, batch, branch, section, cgpa, average_score, readiness_status)
