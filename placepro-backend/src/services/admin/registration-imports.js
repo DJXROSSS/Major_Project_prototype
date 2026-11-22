@@ -2,14 +2,18 @@ const { Router } = require("express");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const { randomUUID } = require("node:crypto");
+const bcrypt = require("bcryptjs");
 const { pool, withTransaction } = require("../../config/db");
 const {
   requireAuth,
   requireRole,
 } = require("../../middleware/auth.middleware");
-const { registerAccount } = require("../../utils/registration");
+const { registerAccount, normalizeMobile } = require("../../utils/registration");
 const { csvCell } = require("../companies/shortlist-export");
+const { createImportPerformance } = require("../../utils/import-performance");
 const router = Router();
+// Registration templates and UI promise a 200-record cap. Assessment imports
+// use their separate 5,000-row workflow.
 const MAX_ROWS = 5000;
 const headers = {
   STUDENT: [
@@ -167,6 +171,15 @@ function statusFor(error) {
 }
 async function validateRows(db, role, rows, batchId) {
   const batches = (await db.query("SELECT * FROM academic_batches")).rows;
+  const batchById = new Map(batches.map((batch) => [String(batch.academic_batch_id), batch]));
+  const batchesByIdentifier = new Map();
+  for (const batch of batches) {
+    for (const identifier of [String(batch.academic_batch_id), batch.name.trim().toLowerCase()]) {
+      const matches = batchesByIdentifier.get(identifier) || [];
+      matches.push(batch);
+      batchesByIdentifier.set(identifier, matches);
+    }
+  }
   const emails = new Map(),
     rolls = new Map();
   for (const r of rows) {
@@ -174,6 +187,29 @@ async function validateRows(db, role, rows, batchId) {
     const roll = (r.submitted.rollNumber || "").toUpperCase();
     if (email) emails.set(email, (emails.get(email) || 0) + 1);
     if (role === "STUDENT" && roll) rolls.set(roll, (rolls.get(roll) || 0) + 1);
+  }
+  const normalizedEmails = [...emails.keys()];
+  const normalizedRolls = [...rolls.keys()];
+  const [existingUsers, existingStudents] = await Promise.all([
+    normalizedEmails.length
+      ? db.query("SELECT user_id, lower(btrim(email)) AS email FROM users WHERE lower(btrim(email))=ANY($1::text[])", [normalizedEmails])
+      : { rows: [] },
+    normalizedEmails.length || normalizedRolls.length
+      ? db.query(
+        `SELECT * FROM students
+         WHERE lower(btrim(email))=ANY($1::text[]) OR upper(btrim(roll_no))=ANY($2::text[])`,
+        [normalizedEmails, normalizedRolls],
+      )
+      : { rows: [] },
+  ]);
+  const usersByEmail = new Map(existingUsers.rows.map((user) => [user.email, user]));
+  const studentsByIdentity = new Map();
+  for (const student of existingStudents.rows) {
+    for (const identity of [String(student.roll_no).trim().toUpperCase(), String(student.email).trim().toLowerCase()]) {
+      const matches = studentsByIdentity.get(identity) || [];
+      matches.push(student);
+      studentsByIdentity.set(identity, matches);
+    }
   }
   const validated = [];
   for (const row of rows) {
@@ -203,28 +239,61 @@ async function validateRows(db, role, rows, batchId) {
         record.academicBatchId = batchId;
         record.cgpa =
           submitted.cgpa === "" ? undefined : Number(submitted.cgpa);
+        const batch = batchById.get(batchId);
+        if (!batch || batch.status !== "active") fail("Select existing active academic batches");
+        if (!Number.isFinite(record.cgpa) && record.cgpa !== undefined)
+          fail("CGPA must be between 0 and 10");
+        if (record.cgpa !== undefined && (record.cgpa < 0 || record.cgpa > 10))
+          fail("CGPA must be between 0 and 10");
+        if (submitted.rollNumber.length > 50) fail("Roll number is required (maximum 50 characters)");
+        if (submitted.name.length > 100) fail("Full name is required (maximum 100 characters)");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.email) || record.email.length > 120)
+          fail("Enter a valid email address");
+        normalizeMobile(submitted.mobileNumber);
+        if (typeof submitted.section !== "string" || submitted.section.length > 10 ||
+          ((batch.sections || []).length && !batch.sections.includes(submitted.section)))
+          fail("Choose a section from the selected batch");
+        if (usersByEmail.has(record.email)) fail("This email already has a login account", 409);
+        const matches = [...new Set([
+          ...(studentsByIdentity.get(submitted.rollNumber.toUpperCase()) || []),
+          ...(studentsByIdentity.get(record.email) || []),
+        ])];
+        if (matches.length) {
+          const student = matches[0];
+          if (matches.length !== 1 ||
+            student.roll_no.trim().toUpperCase() !== submitted.rollNumber.toUpperCase() ||
+            student.email.trim().toLowerCase() !== record.email ||
+            student.full_name.trim().toLowerCase() !== submitted.name.trim().toLowerCase())
+            fail("Existing student identity does not match. Use the existing name, roll number and email", 409);
+          if (student.academic_batch_id && String(student.academic_batch_id) !== batchId)
+            fail("Existing student belongs to a different academic batch", 409);
+          if (student.user_id) fail("This student already has an account", 409);
+          if ((record.cgpa !== undefined && Number(student.cgpa) !== record.cgpa) ||
+            (submitted.section && student.section && student.section !== submitted.section))
+            fail("Existing student CGPA or section conflicts with the supplied details", 409);
+          linksExistingStudent = true;
+        }
       } else {
         record.assignedBatchIds = submitted.assignedBatches
           .split(/[;,]/)
           .map((identifier) => {
             const value = identifier.trim().toLowerCase();
-            const matches = batches.filter(
-              (b) =>
-                String(b.academic_batch_id) === value ||
-                b.name.trim().toLowerCase() === value,
-            );
+            const matches = batchesByIdentifier.get(value) || [];
             if (!value || matches.length !== 1)
               fail("Unknown or ambiguous batch identifier");
             return String(matches[0].academic_batch_id);
           });
         record.assignedBatchIds = [...new Set(record.assignedBatchIds)];
+        if (submitted.name.length > 100) fail("Full name is required (maximum 100 characters)");
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.email) || record.email.length > 120)
+          fail("Enter a valid email address");
+        normalizeMobile(submitted.mobileNumber);
+        if (record.assignedBatchIds.some((id) => batchById.get(id)?.status !== "active"))
+          fail("Select existing active academic batches");
+        if (usersByEmail.has(record.email)) fail("This email already has a login account", 409);
+        if ((studentsByIdentity.get(record.email) || []).length)
+          fail("This email belongs to a student record", 409);
       }
-      const checked = await registerAccount(record, role, null, {
-        client: db,
-        validateOnly: true,
-        checkExistingDetails: true,
-      });
-      linksExistingStudent = checked.linksExistingStudent;
     } catch (error) {
       if (!error.statusCode) throw error;
       if (status === "Valid") status = statusFor(error);
@@ -313,14 +382,15 @@ router.post(
         : next(),
     ),
   async (req, res, next) => {
+    const performance = createImportPerformance(`registration-${req.params.kind}-preview`, req.requestId);
     try {
       const role = roleFor(req.params.kind);
       const batchId =
         role === "STUDENT" ? String(req.body.academicBatchId || "") : null;
       if (role === "STUDENT" && !/^[1-9]\d*$/.test(batchId))
         fail("Select an academic batch before uploading");
-      const rows = parseFile(req.file, role);
-      const validated = await validateRows(pool, role, rows, batchId);
+      const rows = await performance.measure("fileParsingMs", () => parseFile(req.file, role));
+      const validated = await performance.measure("previewValidationMs", () => validateRows(pool, role, rows, batchId));
       if (
         role === "STUDENT" &&
         !(
@@ -332,7 +402,7 @@ router.post(
       )
         fail("Select an existing active academic batch");
       const id = randomUUID();
-      await pool.query(
+      await performance.measure("previewPersistenceMs", () => pool.query(
         `INSERT INTO registration_imports (import_id,created_by,account_role,academic_batch_id,source_filename,submitted_rows) VALUES ($1,$2,$3,$4,$5,$6)`,
         [
           id,
@@ -342,7 +412,8 @@ router.post(
           req.file.originalname.slice(0, 255),
           JSON.stringify(rows),
         ],
-      );
+      ));
+      performance.log({ rows: rows.length, valid: summary(validated).valid });
       res.set("Cache-Control", "no-store").json({
         importId: id,
         rows: responseRows(validated),
@@ -358,6 +429,7 @@ router.post(
   },
 );
 router.post("/users/imports/:kind/confirm", async (req, res, next) => {
+  const performance = createImportPerformance(`registration-${req.params.kind}-confirm`, req.requestId);
   try {
     const role = roleFor(req.params.kind),
       { importId, mode } = req.body;
@@ -366,7 +438,30 @@ router.post("/users/imports/:kind/confirm", async (req, res, next) => {
       !["valid-only", "strict"].includes(mode)
     )
       fail("Choose a valid import session and confirmation mode");
-    const result = await withTransaction(async (client) => {
+    // Bcrypt cost-12 work does not need a database transaction. The locked
+    // validation below remains authoritative, so concurrent imports still
+    // cannot create duplicate identities.
+    const preparedHashes = new Map();
+    const preflight = await pool.query(
+      "SELECT * FROM registration_imports WHERE import_id=$1 AND created_by=$2 AND account_role=$3",
+      [importId, req.user.id, role],
+    );
+    const preflightSession = preflight.rows[0];
+    if (preflightSession?.status === "PREVIEW" && new Date(preflightSession.expires_at) >= new Date()) {
+      const preliminary = await performance.measure("preflightValidationMs", () => validateRows(
+        pool,
+        role,
+        preflightSession.submitted_rows,
+        preflightSession.academic_batch_id ? String(preflightSession.academic_batch_id) : null,
+      ));
+      await performance.measure("passwordHashingMs", async () => {
+        for (const row of preliminary) {
+          if (row.status === "Valid")
+            preparedHashes.set(row.record.email, await bcrypt.hash(normalizeMobile(row.record.mobileNumber), 12));
+        }
+      });
+    }
+    const result = await performance.measure("transactionMs", () => withTransaction(async (client) => {
       const { rows } = await client.query(
         "SELECT * FROM registration_imports WHERE import_id=$1 AND created_by=$2 AND account_role=$3 FOR UPDATE",
         [importId, req.user.id, role],
@@ -401,6 +496,7 @@ router.post("/users/imports/:kind/confirm", async (req, res, next) => {
             const account = await registerAccount(row.record, role, req.user, {
               client,
               checkExistingDetails: true,
+              passwordHash: preparedHashes.get(row.record.email),
             });
             row.status = "Imported";
             row.message = row.linksExistingStudent
@@ -446,7 +542,8 @@ router.post("/users/imports/:kind/confirm", async (req, res, next) => {
         ],
       );
       return result;
-    });
+    }));
+    performance.log({ rows: result.rows?.length, imported: result.imported, skipped: result.skipped });
     res.set("Cache-Control", "no-store").json(result);
   } catch (error) {
     next(error);

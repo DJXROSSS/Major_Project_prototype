@@ -2,12 +2,16 @@ const { Router } = require("express");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const { pool, withTransaction, writeAuditLog } = require("../../../config/db");
-const { recomputeAndSyncStudentReadiness } = require("../../../utils/student-metrics");
+const { recomputeAndSyncStudentReadiness, recomputeAndSyncStudentReadinessForStudents } = require("../../../utils/student-metrics");
 const { requireAuth, requireRole } = require("../../../middleware/auth.middleware");
+const { createImportPerformance } = require("../../../utils/import-performance");
 
 const router = Router();
 const trainerIdsOf = (value) => Array.isArray(value) ? value.map(String) : [];
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }); //5mb
+const MAX_IMPORT_ROWS = 5000;
+const MAX_IMPORT_COLUMNS = 100;
+const IMPORT_WRITE_BATCH_SIZE = 500;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 8 } }); //5mb
 
 router.get("/assessments", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
   try {
@@ -192,6 +196,7 @@ router.patch("/assessments/:assessmentId", requireAuth, requireRole(["admin", "t
 });
 
 router.post("/assessment-imports/preview", requireAuth, requireRole(["admin", "trainer"]), upload.single("file"), async (req, res, next) => {
+  const performance = createImportPerformance("assessment-preview", req.requestId);
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -210,9 +215,12 @@ router.post("/assessment-imports/preview", requireAuth, requireRole(["admin", "t
         return res.status(403).json({ error: { code: "FORBIDDEN", message: "You can only create assessments for assigned batches" } });
       }
     }
-    const workbook = XLSX.read(req.file.buffer, { type: "buffer", raw: true });
+    const workbook = await performance.measure("fileParsingMs", () => XLSX.read(req.file.buffer, { type: "buffer", raw: true, sheetRows: MAX_IMPORT_ROWS + 2 }));
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    if (!sheet) return res.status(422).json({ error: { code: "EMPTY_SHEET", message: "Spreadsheet has no worksheets" } });
+    if (sheet["!fullref"] && XLSX.utils.decode_range(sheet["!fullref"]).e.r > MAX_IMPORT_ROWS)
+      return res.status(422).json({ error: { code: "IMPORT_TOO_LARGE", message: `Maximum ${MAX_IMPORT_ROWS} rows per assessment import` } });
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", blankrows: false });
 
     if (matrix.length < 2) {
       return res.status(422).json({
@@ -222,9 +230,13 @@ router.post("/assessment-imports/preview", requireAuth, requireRole(["admin", "t
 
     const headers = matrix[0].map((h) => String(h).trim());
     const dataRows = matrix.slice(1).filter((r) => r.some((cell) => String(cell).trim() !== ""));
+    if (headers.length > MAX_IMPORT_COLUMNS)
+      return res.status(422).json({ error: { code: "IMPORT_TOO_WIDE", message: `Maximum ${MAX_IMPORT_COLUMNS} columns per assessment import` } });
+    if (dataRows.length > MAX_IMPORT_ROWS)
+      return res.status(422).json({ error: { code: "IMPORT_TOO_LARGE", message: `Maximum ${MAX_IMPORT_ROWS} rows per assessment import` } });
     const dbEventType = type === "mock-interview" ? "MOCK_INTERVIEW" : "EXAM";
 
-    const { rows } = await pool.query(
+    const { rows } = await performance.measure("previewPersistenceMs", () => pool.query(
       `INSERT INTO import_batches
        (uploaded_by, academic_batch_id, event_type, event_title, event_date, original_filename,
         headers, raw_preview_rows, column_mapping_config, total_rows_processed, import_status)
@@ -241,7 +253,9 @@ router.post("/assessment-imports/preview", requireAuth, requireRole(["admin", "t
         JSON.stringify(dataRows),
         dataRows.length,
       ]
-    );
+    ));
+
+    performance.log({ rows: dataRows.length, columns: headers.length });
 
     res.status(201).json({
       importId: String(rows[0].batch_id),
@@ -258,6 +272,7 @@ router.post("/assessment-imports/preview", requireAuth, requireRole(["admin", "t
 });
 
 router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["admin", "trainer"]), async (req, res, next) => {
+  const performance = createImportPerformance("assessment-confirm", req.requestId);
   try {
     const { rollNumberColumn, skillColumns } = req.body;
     const batchRes = await pool.query(`SELECT * FROM import_batches WHERE batch_id = $1`, [
@@ -280,10 +295,10 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
     }
     const dataRows = imp.raw_preview_rows;
 
-    const skillRes = await pool.query(
+    const skillRes = await performance.measure("databaseLookupMs", () => pool.query(
       `SELECT skill_id, skill_code, parameter_type, is_active
        FROM skill_taxonomy WHERE deleted_at IS NULL`
-    );
+    ));
     const skillLookup = new Map();
     for (const s of skillRes.rows) {
       skillLookup.set(String(s.skill_id), s);
@@ -304,7 +319,7 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
     if (issues.length) {
       return res.status(422).json({ error: { code: 'IMPORT_VALIDATION_FAILED', message: 'Spreadsheet contains validation errors', details: issues } });
     }
-    const studentRes = await pool.query(`SELECT student_id, roll_no FROM students`);
+    const studentRes = await performance.measure("studentLookupMs", () => pool.query(`SELECT student_id, roll_no FROM students`));
     const rollMap = new Map();
     for (const s of studentRes.rows) {
       rollMap.set(String(s.roll_no).toUpperCase(), Number(s.student_id));
@@ -385,7 +400,7 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
       });
     }
 
-    await withTransaction(async (client) => {
+    await performance.measure("databaseInsertionAndCommitMs", () => withTransaction(async (client) => {
       const locked = await client.query(`SELECT import_status FROM import_batches WHERE batch_id = $1 FOR UPDATE`, [imp.batch_id]);
       if (locked.rows[0]?.import_status !== "PREVIEW") {
         const error = new Error("Import has already been confirmed");
@@ -399,62 +414,47 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
         [JSON.stringify({ rollNumberColumn, skillColumns }), validatedRows.length, imp.batch_id]
       );
 
-      for (const review of pendingReviews) {
+      for (let offset = 0; offset < pendingReviews.length; offset += IMPORT_WRITE_BATCH_SIZE) {
+        const reviews = pendingReviews.slice(offset, offset + IMPORT_WRITE_BATCH_SIZE);
         await client.query(
-          `INSERT INTO import_student_reviews
-           (import_batch_id, row_number, roll_no, raw_row, requested_by, status)
-           VALUES ($1, $2, $3, $4, $5, 'PENDING')
-           ON CONFLICT (import_batch_id, roll_no)
-           DO UPDATE SET row_number = EXCLUDED.row_number, raw_row = EXCLUDED.raw_row
+          `INSERT INTO import_student_reviews (import_batch_id, row_number, roll_no, raw_row, requested_by, status)
+           SELECT $1, row_number, roll_no, raw_row, $2, 'PENDING'
+           FROM jsonb_to_recordset($3::jsonb) AS r(row_number integer, roll_no text, raw_row jsonb)
+           ON CONFLICT (import_batch_id, roll_no) DO UPDATE
+           SET row_number = EXCLUDED.row_number, raw_row = EXCLUDED.raw_row
            WHERE import_student_reviews.status = 'PENDING'`,
-          [
-            imp.batch_id,
-            review.rowNum,
-            review.roll,
-            JSON.stringify(review.rawObj),
-            req.user.id,
-          ]
+          [imp.batch_id, req.user.id, JSON.stringify(reviews.map((r) => ({ row_number: r.rowNum, roll_no: r.roll, raw_row: r.rawObj })))]
         );
       }
 
-      for (const vr of validatedRows) {
-        const evalInsert = await client.query(
-          `INSERT INTO evaluation_records
-           (batch_id, student_id, trainer_id, marks_obtained, max_marks, overall_score_pct, raw_excel_row)
-           VALUES ($1, $2, $3, $4, $5, $6, $7)
-           RETURNING record_id`,
-          [
-            imp.batch_id,
-            vr.studentId,
-            req.user.id,
-            vr.totalMarks,
-            vr.totalMax,
-            vr.overallPct,
-            JSON.stringify(vr.rawObj),
-          ]
+      for (let offset = 0; offset < validatedRows.length; offset += IMPORT_WRITE_BATCH_SIZE) {
+        const values = validatedRows.slice(offset, offset + IMPORT_WRITE_BATCH_SIZE).map((row) => ({
+          student_id: row.studentId, marks_obtained: row.totalMarks, max_marks: row.totalMax,
+          overall_score_pct: row.overallPct, raw_excel_row: row.rawObj,
+          skills: row.perSkill.map((skill) => ({
+            skill_id: skill.skillId, marks: skill.marks, max_marks: skill.maxMarks, pct: skill.pct,
+          })),
+        }));
+        await client.query(
+          `WITH input AS (
+             SELECT * FROM jsonb_to_recordset($3::jsonb) AS r(
+               student_id bigint, marks_obtained numeric, max_marks numeric,
+               overall_score_pct numeric, raw_excel_row jsonb, skills jsonb)
+           ), inserted AS (
+             INSERT INTO evaluation_records (batch_id, student_id, trainer_id, marks_obtained, max_marks, overall_score_pct, raw_excel_row)
+             SELECT $1, student_id, $2, marks_obtained, max_marks, overall_score_pct, raw_excel_row FROM input
+             RETURNING record_id, student_id
+           )
+           INSERT INTO skill_ratings (student_id, skill_id, marks_obtained, max_marks, score_percentage, source_type, source_id)
+           SELECT i.student_id, skill.skill_id, skill.marks, skill.max_marks, skill.pct, $4::event_type, inserted.record_id
+           FROM input i
+           JOIN inserted ON inserted.student_id = i.student_id
+           CROSS JOIN LATERAL jsonb_to_recordset(i.skills) AS skill(skill_id bigint, marks numeric, max_marks numeric, pct numeric)`,
+          [imp.batch_id, req.user.id, JSON.stringify(values), imp.event_type]
         );
-        const recordId = evalInsert.rows[0].record_id;
-
-        for (const sk of vr.perSkill) {
-          await client.query(
-            `INSERT INTO skill_ratings
-             (student_id, skill_id, marks_obtained, max_marks, score_percentage, source_type, source_id)
-             VALUES ($1, $2, $3, $4, $5, $6::event_type, $7)`,
-            [
-              vr.studentId,
-              sk.skillId,
-              sk.marks,
-              sk.maxMarks,
-              sk.pct,
-              imp.event_type,
-              recordId,
-            ]
-          );
-        }
-
-        await recomputeAndSyncStudentReadiness(client, vr.studentId);
       }
-    });
+      await recomputeAndSyncStudentReadinessForStudents(client, validatedRows.map((row) => row.studentId));
+    }));
 
     await writeAuditLog(
       req.user.id,
@@ -463,6 +463,7 @@ router.post("/assessment-imports/:importId/confirm", requireAuth, requireRole(["
       `Confirmed import ${imp.event_title} (${validatedRows.length} rows)`,
       "success"
     );
+    performance.log({ rows: dataRows.length, imported: validatedRows.length, pendingReviews: pendingReviews.length });
 
     res.status(201).json({
       id: String(imp.batch_id),

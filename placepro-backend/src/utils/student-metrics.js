@@ -95,6 +95,60 @@ async function recomputeAndSyncStudentReadiness(db, studentId) {
   );
 }
 
+// Assessment imports update many students at once. Keep the formula identical to
+// recomputeAndSyncStudentReadiness while letting PostgreSQL aggregate the affected
+// set in one statement.
+async function recomputeAndSyncStudentReadinessForStudents(db, studentIds) {
+  const ids = [...new Set(studentIds.map(String))];
+  if (!ids.length) return;
+  await db.query(
+    `WITH affected AS (
+       SELECT student_id, cgpa FROM students WHERE student_id = ANY($1::bigint[])
+     ), skill_scores AS (
+       SELECT sr.student_id, st.skill_code, ROUND(AVG(sr.score_percentage), 1) AS avg_score
+       FROM skill_ratings sr
+       JOIN skill_taxonomy st ON st.skill_id = sr.skill_id
+       JOIN affected a ON a.student_id = sr.student_id
+       WHERE st.deleted_at IS NULL
+       GROUP BY sr.student_id, st.skill_code
+     ), skill_summary AS (
+       SELECT student_id,
+              ROUND(AVG(avg_score), 1) AS average_score,
+              COALESCE(MAX(avg_score) FILTER (WHERE skill_code = $2), 0) AS comm_score
+       FROM skill_scores GROUP BY student_id
+     ), project_scores AS (
+       SELECT a.student_id, ROUND(AVG(latest.final_score), 2) AS project_score
+       FROM affected a
+       LEFT JOIN projects p ON p.student_id = a.student_id AND p.ownership_status = 'VERIFIED'
+       LEFT JOIN LATERAL (
+         SELECT final_score FROM project_score_snapshots
+         WHERE project_id = p.project_id AND final_score IS NOT NULL
+         ORDER BY computed_at DESC, project_score_snapshot_id DESC LIMIT 1
+       ) latest ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT review_status FROM project_reviews WHERE project_id = p.project_id
+         ORDER BY created_at DESC, project_review_id DESC LIMIT 1
+       ) review ON TRUE
+       WHERE review.review_status = 'APPROVED'
+       GROUP BY a.student_id
+     )
+     UPDATE students s
+     SET average_score = COALESCE(ss.average_score, 0),
+         readiness_status = CASE
+           WHEN COALESCE(ss.average_score, 0) >= $3
+            AND a.cgpa >= $4
+            AND COALESCE(ss.comm_score, 0) >= $5
+            AND ps.project_score >= $6 THEN 'PR'::readiness_status
+           ELSE 'NPR'::readiness_status
+         END
+     FROM affected a
+     LEFT JOIN skill_summary ss ON ss.student_id = a.student_id
+     LEFT JOIN project_scores ps ON ps.student_id = a.student_id
+     WHERE s.student_id = a.student_id`,
+    [ids, PR_THRESHOLDS.commSkillCode, PR_THRESHOLDS.minAverage, PR_THRESHOLDS.minCgpa, PR_THRESHOLDS.minComm, PR_THRESHOLDS.minProjectScore],
+  );
+}
+
 async function buildStudentResponseObject(db, studentRow) {
   const studentId = studentRow.student_id;
   const projectScoreData = await getStudentProjectScore(db, studentId);
@@ -157,5 +211,6 @@ module.exports = {
   PR_THRESHOLDS,
   getStudentProjectScore,
   recomputeAndSyncStudentReadiness,
+  recomputeAndSyncStudentReadinessForStudents,
   buildStudentResponseObject,
 };

@@ -294,7 +294,14 @@ export default function RegistrationImport({
                     );
                     setResult(confirmed);
                     if (confirmed.confirmed) {
-                      await useAppStore.getState().refreshData();
+                      // Only registration-dependent collections need fresh data here.
+                      // Avoid reloading dashboards, companies, skills and assessments.
+                      const [users, students, batches] = await Promise.all([
+                        api.users(),
+                        api.students(),
+                        api.batches(),
+                      ]);
+                      useAppStore.setState({ users, students: students.items, batches });
                       onRegistered?.("");
                       toast({
                         title: "Import completed",

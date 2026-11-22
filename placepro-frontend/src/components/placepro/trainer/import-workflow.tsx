@@ -167,14 +167,11 @@ function autoSuggestMapping(headers: string[], skills: Skill[]): Record<number, 
   return mapping;
 }
 
-/** Match a spreadsheet roll against the batch roster (case / leading-zero tolerant). */
-function findStudentByRoll(roll: string, roster: Student[]): Student | undefined {
+/** Match a spreadsheet roll against an indexed batch roster. */
+function findStudentByRoll(roll: string, rosterByRoll: Map<string, Student>): Student | undefined {
   const norm = roll.trim().toLowerCase();
   const noZeros = norm.replace(/^0+/, "");
-  return roster.find((s) => {
-    const r = s.rollNumber.toLowerCase();
-    return r === norm || r.replace(/^0+/, "") === noZeros;
-  });
+  return rosterByRoll.get(norm) ?? rosterByRoll.get(noZeros);
 }
 
 function sanitizeGrid(grid: string[][]): ParsedSheet | null {
@@ -247,6 +244,15 @@ export default function ImportWorkflow() {
     () => batches.find((b) => b.id === batchId)?.name ?? "",
     [batches, batchId],
   );
+  const rosterByRoll = useMemo(() => {
+    const index = new Map<string, Student>();
+    for (const student of roster) {
+      const normalized = student.rollNumber.trim().toLowerCase();
+      index.set(normalized, student);
+      index.set(normalized.replace(/^0+/, ""), student);
+    }
+    return index;
+  }, [roster]);
 
   /* ----------------------- load batches + skills ----------------------- */
 
@@ -429,7 +435,7 @@ export default function ImportWorkflow() {
           issues.push({ rowNo, roll: "—", reason: "Roll number is missing" });
           return;
         }
-        const student = findStudentByRoll(roll, roster);
+        const student = findStudentByRoll(roll, rosterByRoll);
         if (!student) {
           issues.push({
             rowNo,
@@ -456,7 +462,6 @@ export default function ImportWorkflow() {
           const label = sheet.headers[c] || `Column ${c + 1}`;
           const raw = (row[c] ?? "").trim();
           const num = Number(raw);
-          console.log(`Row ${rowNo}, ${label}: raw="${raw}", num=${num}`);
           if (raw === "" || Number.isNaN(num)) {
             problem = `Missing or invalid score in “${label}”`;
             break;
@@ -486,7 +491,7 @@ export default function ImportWorkflow() {
     const unmappedCount = sheet.headers.length - mappedCols.length;
 
     return { rollCol, skillCols, mappedCols, validRows, issues, duplicateCount, unknownRolls, emptyCells, unmappedCount };
-  }, [sheet, mapping, maxMarks, roster, activeSkills]);
+  }, [sheet, mapping, maxMarks, rosterByRoll, activeSkills]);
 
   /* ------------------------------- actions ------------------------------- */
 

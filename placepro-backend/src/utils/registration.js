@@ -99,7 +99,7 @@ async function registerAccount(body, role, actor, options = {}) {
     invalid("CGPA must be between 0 and 10");
   const passwordHash = options.validateOnly
     ? null
-    : await bcrypt.hash(mobile, 12);
+    : options.passwordHash || await bcrypt.hash(mobile, 12);
   try {
     const work = async (client) => {
       // Registration requests for the same email serialize even before a users row exists.
