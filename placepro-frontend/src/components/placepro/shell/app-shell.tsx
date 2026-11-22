@@ -54,8 +54,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </main>
         <footer className="mt-auto">
           <div className="mx-auto flex max-w-[1400px] flex-col gap-1 border-t border-border/70 px-4 py-4 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
-            <p>PlacePro · GLA University · G-171</p>
-            <p className="pb-[env(safe-area-inset-bottom)]">Demo environment — data resets on reload</p>
+            {/* <p>PlacePro · GLA University · G-171</p> */}
+            {/* <p className="pb-[env(safe-area-inset-bottom)]">Demo environment — data resets on reload</p> */}
           </div>
         </footer>
       </div>
