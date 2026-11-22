@@ -11,6 +11,11 @@ export class ApiError extends Error {
   }
 }
 
+function responseError(body: { error?: { message?: string; details?: ApiErrorDetail[] } } | null, status: number) {
+  const details = Array.isArray(body?.error?.details) ? body.error.details : [];
+  return new ApiError(body?.error?.message ?? "Request failed", status, details);
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method ?? "GET";
   try {
@@ -21,15 +26,33 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     });
     if (response.status === 204) return undefined as T;
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const details = Array.isArray(body?.error?.details) ? (body.error.details as ApiErrorDetail[]) : [];
-      throw new ApiError(body?.error?.message ?? "Request failed", response.status, details);
-    }
+    if (!response.ok) throw responseError(body, response.status);
     return body as T;
   } catch (error) {
     if (!init.signal?.aborted) logger.error("api.request_failed", error, { method, path, status: error instanceof ApiError ? error.status : undefined });
     throw error;
   }
+}
+
+function uploadRegistrationPreview(path: string, form: FormData, onProgress: (progress: number | "uploaded") => void) {
+  return new Promise<RegistrationImportResult>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable && event.total > 0) onProgress(Math.floor(event.loaded / event.total * 100));
+    });
+    xhr.upload.addEventListener("load", () => onProgress("uploaded"));
+    xhr.open("POST", `${API_BASE}${path}`);
+    xhr.withCredentials = true;
+    xhr.responseType = "json";
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) reject(responseError(xhr.response, xhr.status));
+      else if (!xhr.response) reject(new Error("The upload response could not be read."));
+      else resolve(xhr.response);
+    };
+    xhr.onerror = () => reject(new Error("Upload connection failed. Try again."));
+    xhr.onabort = () => reject(new Error("Upload interrupted. Try again."));
+    xhr.send(form);
+  });
 }
 
 const json = (method: string, body?: unknown): RequestInit => ({ method, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -176,7 +199,8 @@ export type ImportPreview = {
 
 export const api = {
   registrationTemplate: (kind: "students" | "trainers") => request<{ fileName: string; contentBase64: string }>(`/users/imports/${kind}/template`),
-  previewRegistrationImport: (kind: "students" | "trainers", form: FormData) => request<RegistrationImportResult>(`/users/imports/${kind}/preview`, { method: "POST", body: form }),
+  previewRegistrationImport: (kind: "students" | "trainers", form: FormData, onProgress: (progress: number | "uploaded") => void) =>
+    uploadRegistrationPreview(`/users/imports/${kind}/preview`, form, onProgress),
   confirmRegistrationImport: (kind: "students" | "trainers", importId: string, mode: "valid-only" | "strict", chunkSize: number) => request<RegistrationImportResult>(`/users/imports/${kind}/confirm`, json("POST", { importId, mode, chunkSize })),
   registerStudent: (payload: { name: string; email: string; mobileNumber: string; rollNumber: string; academicBatchId: string; section: string; cgpa?: number }) => request<{ studentId: string; userId: string }>("/students", json("POST", payload)),
   registerTrainer: (payload: { name: string; email: string; mobileNumber: string; assignedBatchIds: string[] }) => request<{ userId: string }>("/users/trainers", json("POST", payload)),

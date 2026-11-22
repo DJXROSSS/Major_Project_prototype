@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import RegistrationImport from "./registration-import";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { UserPlus } from "lucide-react";
@@ -43,6 +43,7 @@ export default function RegistrationButton({
   const [error, setError] = useState("");
   const [batchError, setBatchError] = useState("");
   const [search, setSearch] = useState("");
+  const addButton = useRef<HTMLButtonElement>(null);
   const empty = {
     name: "",
     email: "",
@@ -83,6 +84,7 @@ export default function RegistrationButton({
   return (
     <>
       <Button
+        ref={addButton}
         size="sm"
         onClick={() => {
           setTab("manual");
@@ -102,6 +104,10 @@ export default function RegistrationButton({
       >
         <DialogContent
           className={`max-h-[90vh] overflow-y-auto ${tab === "import" ? "sm:max-w-5xl" : "sm:max-w-lg"}`}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            addButton.current?.focus();
+          }}
         >
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
@@ -395,8 +401,7 @@ export default function RegistrationButton({
                 batches={batches}
                 batchesLoading={loading}
                 batchError={batchError}
-                onBusy={setBusy}
-                onRegistered={onRegistered}
+                onUploadStarted={() => setOpen(false)}
               />
             </TabsContent> : null}
           </Tabs>

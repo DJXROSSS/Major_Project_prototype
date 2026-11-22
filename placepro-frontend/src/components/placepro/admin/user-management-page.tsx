@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw, UserPlus, Users } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
+import { useRegistrationImports } from "@/lib/placepro/registration-imports";
 import type { AppUser, Role } from "@/types";
 import RegistrationButton from "./registration-button";
 import { PageHeader } from "@/components/placepro/shared/page-header";
@@ -79,6 +80,7 @@ export default function UserManagementPage() {
   const batches = useAppStore((s) => s.batches);
   const addUser = useAppStore((s) => s.addUser);
   const updateUser = useAppStore((s) => s.updateUser);
+  const importRevision = useRegistrationImports((s) => s.revision);
   const { toast } = useToast();
 
   /* filters */
@@ -126,7 +128,7 @@ export default function UserManagementPage() {
       window.clearTimeout(timer);
       if (requestId.current === currentRequest) requestId.current += 1;
     };
-  }, [search, roleFilter, page, refreshToken]);
+  }, [search, roleFilter, page, refreshToken, importRevision]);
 
   const pageCount = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
   const hasFilters = search !== "" || roleFilter !== "all";

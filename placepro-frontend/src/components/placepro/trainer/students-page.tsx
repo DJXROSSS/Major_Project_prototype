@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { UsersRound } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
+import { useRegistrationImports } from "@/lib/placepro/registration-imports";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/placepro/api";
 import { useSubjectColumns } from "./use-subject-columns";
@@ -52,6 +53,7 @@ const optionalFilter = (value: string) => value === "all" ? undefined : value;
 
 export default function StudentsPage() {
   const user = useAppStore(s => s.user);
+  const importRevision = useRegistrationImports((s) => s.revision);
   const navigate = useAppStore((s) => s.navigate);
   const batches = useAppStore((s) => s.batches);
   const columns = useSubjectColumns();
@@ -126,7 +128,7 @@ export default function StudentsPage() {
       .catch(err => { if (!request.signal.aborted) setError(err instanceof Error ? err.message : "Unable to load students."); })
       .finally(() => { if (!request.signal.aborted) setLoading(false); });
     return () => request.abort();
-  }, [query, batch, section, pr, domain, projectFilter, sort, page, retry]);
+  }, [query, batch, section, pr, domain, projectFilter, sort, page, retry, importRevision]);
   const pageRows = result.items;
   const currentPage = result.page;
   const pageCount = Math.max(1, Math.ceil(result.total / PAGE_SIZE));

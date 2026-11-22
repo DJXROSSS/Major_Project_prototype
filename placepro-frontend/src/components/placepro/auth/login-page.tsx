@@ -77,7 +77,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-xs text-primary-foreground/50">
-          University Institute of Engineering · Department of Computer Science
+          GLA University · Department of Computer Science
         </p>
       </section>
 
