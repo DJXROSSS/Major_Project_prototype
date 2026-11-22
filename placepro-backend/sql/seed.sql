@@ -5,10 +5,10 @@
 
 INSERT INTO users (email, password_hash, full_name, role, title, status)
 VALUES
-  ('admin@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Rajesh Kumar', 'ADMIN', 'Placement Director', 'active'),
-  ('trainer@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Priya Nair', 'TRAINER', 'Technical Trainer', 'active'),
-  ('ananya@example.com', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Ananya Sharma', 'STUDENT', 'Student', 'active'),
-  ('25cs007@campus.edu', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', 'Student 25CS007', 'STUDENT', 'Student', 'active')
+ ('admin@example.com', '$2a$12$qf4l0nWeqE5EedRm01iYSu1f6rBGU6cpdjYMCXIy9F2qETxeEq.4i', 'Rajesh Kumar', 'ADMIN', 'Placement Director', 'active'),
+  ('trainer@example.com', '$2a$12$qf4l0nWeqE5EedRm01iYSu1f6rBGU6cpdjYMCXIy9F2qETxeEq.4i', 'Priya Nair', 'TRAINER', 'Technical Trainer', 'active'),
+  ('ananya@example.com', '$2a$12$qf4l0nWeqE5EedRm01iYSu1f6rBGU6cpdjYMCXIy9F2qETxeEq.4i', 'Ananya Sharma', 'STUDENT', 'Student', 'active'),
+  ('25cs007@campus.edu', '$2a$12$qf4l0nWeqE5EedRm01iYSu1f6rBGU6cpdjYMCXIy9F2qETxeEq.4i', 'Student 25CS007', 'STUDENT', 'Student', 'active')
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO academic_batches (name, department, academic_years, sections, trainer_ids, status)
