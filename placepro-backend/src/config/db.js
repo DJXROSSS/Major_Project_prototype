@@ -1,3 +1,4 @@
+
 const { Pool } = require("pg");
 const dotenv = require("dotenv");
 const { logger } = require("../utils/logger");
@@ -9,10 +10,13 @@ const pool = new Pool({
   max: 20,
 });
 
-pool.on("error", (error) => logger.error("database.pool_error", error));
+pool.on("error", (error) => {
+  logger.error("database.pool_error", error);
+});
 
 async function withTransaction(fn) {
   const client = await pool.connect();
+
   try {
     await client.query("BEGIN");
     const result = await fn(client);
@@ -24,6 +28,7 @@ async function withTransaction(fn) {
     } catch (rollbackError) {
       logger.error("database.rollback_failed", rollbackError);
     }
+
     logger.error("database.transaction_failed", err);
     throw err;
   } finally {
@@ -31,11 +36,26 @@ async function withTransaction(fn) {
   }
 }
 
-async function writeAuditLog(actorId, actorName, moduleName, action, status = "success", metadata) {
+async function writeAuditLog(
+  actorId,
+  actorName,
+  moduleName,
+  action,
+  status = "success",
+  metadata
+) {
   await pool.query(
-    `INSERT INTO audit_logs (actor_id, actor_name, module, action, status, metadata)
+    `INSERT INTO audit_logs
+      (actor_id, actor_name, module, action, status, metadata)
      VALUES ($1, $2, $3, $4, $5, $6)`,
-    [actorId, actorName, moduleName, action, status, metadata ? JSON.stringify(metadata) : null]
+    [
+      actorId,
+      actorName,
+      moduleName,
+      action,
+      status,
+      metadata ? JSON.stringify(metadata) : null,
+    ]
   );
 }
 

@@ -8,7 +8,12 @@ const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || "placepro-dev-secret";
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", maxAge: 7 * 24 * 60 * 60 * 1000 };
 function session(res, u) {
-  const token = jwt.sign({ userId: u.user_id, authVersion: Number(u.auth_version) }, JWT_SECRET, { expiresIn: "7d" });
+  const token = jwt.sign({ 
+          userId: u.user_id, 
+          authVersion: Number(u.auth_version) 
+        }, 
+        JWT_SECRET, { expiresIn: "7d" }
+      );
   res.cookie("placepro_session", token, cookieOptions);
   return { token, user: { id: String(u.user_id), name: u.full_name, email: u.email, role: String(u.role).toLowerCase(),
     title: u.title || u.role, mustChangePassword: Boolean(u.must_change_password), ...(u.student_id ? { studentId: String(u.student_id) } : {}) } };
