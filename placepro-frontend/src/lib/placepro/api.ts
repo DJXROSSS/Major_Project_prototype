@@ -27,7 +27,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     }
     return body as T;
   } catch (error) {
-    logger.error("api.request_failed", error, { method, path, status: error instanceof ApiError ? error.status : undefined });
+    if (!init.signal?.aborted) logger.error("api.request_failed", error, { method, path, status: error instanceof ApiError ? error.status : undefined });
     throw error;
   }
 }
@@ -177,7 +177,7 @@ export type ImportPreview = {
 export const api = {
   registrationTemplate: (kind: "students" | "trainers") => request<{ fileName: string; contentBase64: string }>(`/users/imports/${kind}/template`),
   previewRegistrationImport: (kind: "students" | "trainers", form: FormData) => request<RegistrationImportResult>(`/users/imports/${kind}/preview`, { method: "POST", body: form }),
-  confirmRegistrationImport: (kind: "students" | "trainers", importId: string, mode: "valid-only" | "strict") => request<RegistrationImportResult>(`/users/imports/${kind}/confirm`, json("POST", { importId, mode })),
+  confirmRegistrationImport: (kind: "students" | "trainers", importId: string, mode: "valid-only" | "strict", chunkSize: number) => request<RegistrationImportResult>(`/users/imports/${kind}/confirm`, json("POST", { importId, mode, chunkSize })),
   registerStudent: (payload: { name: string; email: string; mobileNumber: string; rollNumber: string; academicBatchId: string; section: string; cgpa?: number }) => request<{ studentId: string; userId: string }>("/students", json("POST", payload)),
   registerTrainer: (payload: { name: string; email: string; mobileNumber: string; assignedBatchIds: string[] }) => request<{ userId: string }>("/users/trainers", json("POST", payload)),
   changePassword: (currentPassword: string, newPassword: string) => request<{ user: SessionUser }>("/auth/change-password", json("POST", { currentPassword, newPassword })),
@@ -187,9 +187,8 @@ export const api = {
   dashboard: () => request<DashboardData>("/dashboard"),
   // Compatibility snapshot only. Complete rosters must use listStudents page-by-page.
   students: () => request<Paginated<Student>>("/students?page=1&pageSize=100"),
-  // Paged roster for a single batch (used by the import wizard).
-  listStudents: (p: { batchId?: string; page?: number; pageSize?: number; q?: string; section?: string; prStatus?: string; domainId?: string; projectFilter?: string; sort?: string }) =>
-    request<Paginated<Student>>(`/students${qs(p)}`),
+  listStudents: (p: { batchId?: string; page?: number; pageSize?: number; q?: string; section?: string; prStatus?: string; domainId?: string; projectFilter?: string; sort?: string }, signal?: AbortSignal) =>
+    request<Paginated<Student>>(`/students${qs(p)}`, { signal }),
   student: (id: string) => request<Student>(`/students/${id}`),
   updateStudent: (id: string, payload: { name?: string; email?: string; mobileNumber?: string; section?: string; cgpa?: number }) =>
     request<Student>(`/students/${encodeURIComponent(id)}`, json("PATCH", payload)),
@@ -322,8 +321,14 @@ export type RegistrationImportResult = {
   importId: string;
   confirmed?: boolean;
   rows: { rowNumber: number; submitted: Record<string,string>; status: string; message: string; linksExistingStudent?: boolean }[];
-  summary?: { total: number; valid: number; invalid: number; alreadyExists: number };
+  fileName?: string;
+  mode?: "valid-only" | "strict";
+  summary?: { total: number; valid: number; invalid: number; alreadyExists: number; duplicates?: number };
   imported?: number;
   skipped?: number;
+  failed?: number;
+  chunkSize?: number;
+  processingRows?: number;
+  totalChunks?: number;
   errorReport: string;
 };

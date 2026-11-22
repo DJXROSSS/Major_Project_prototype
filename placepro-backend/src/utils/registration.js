@@ -68,6 +68,69 @@ async function findStudentByIdentity(
   return student;
 }
 
+async function insertRegistrationUsers(client, accounts, role) {
+  const { rows } = await client.query(
+    `INSERT INTO users (full_name,email,mobile_number,password_hash,role,title,must_change_password)
+     SELECT name,email,mobile,password_hash,$2::user_role,$3,TRUE
+     FROM jsonb_to_recordset($1::jsonb) AS input(name text,email text,mobile text,password_hash text)
+     RETURNING user_id,email`,
+    [JSON.stringify(accounts), role, role === "STUDENT" ? "Student" : "Trainer"],
+  );
+  if (rows.length !== accounts.length) invalid("A login account could not be created");
+  return rows;
+}
+
+async function writeRegistrationAudits(client, actor, role, users) {
+  await client.query(
+    `INSERT INTO audit_logs (actor_id,actor_name,module,action,status)
+     SELECT $1,$2,'Users','Registered ' || $3 || ' account ' || id,'success'
+     FROM unnest($4::bigint[]) AS accounts(id)`,
+    [actor.id, actor.name, role.toLowerCase(), users.map((user) => user.user_id)],
+  );
+}
+
+// The caller validates identities and holds the applicable batch/student locks.
+// A failed write must roll back both the users and student changes together.
+async function insertStudentAccounts(client, accounts, batch, actor) {
+  const users = await insertRegistrationUsers(client, accounts, "STUDENT");
+  const userIds = new Map(users.map((user) => [user.email, user.user_id]));
+  const students = accounts.map(({ email, name, roll, section, cgpa, studentId }) => ({
+    email, name, roll, section, cgpa, student_id: studentId, user_id: userIds.get(email),
+  }));
+  const linked = students.filter((student) => student.student_id != null);
+  const created = students.filter((student) => student.student_id == null);
+  const studentIds = new Map();
+  if (linked.length) {
+    // Linking leaves the existing student's scores, section, and assessments intact.
+    const { rows } = await client.query(
+      `UPDATE students AS s SET user_id=input.user_id,
+         academic_batch_id=COALESCE(s.academic_batch_id,$2), batch=$3
+       FROM jsonb_to_recordset($1::jsonb) AS input(student_id bigint,user_id bigint)
+       WHERE s.student_id=input.student_id AND s.user_id IS NULL
+       RETURNING s.user_id,s.student_id`,
+      [JSON.stringify(linked), batch.academic_batch_id, batch.name],
+    );
+    if (rows.length !== linked.length) invalid("An existing student could not be linked", 409);
+    for (const row of rows) studentIds.set(row.user_id, row.student_id);
+  }
+  if (created.length) {
+    const { rows } = await client.query(
+      `INSERT INTO students (user_id,academic_batch_id,roll_no,full_name,email,batch,branch,section,cgpa)
+       SELECT user_id,$2,roll,name,email,$3,$4,section,cgpa
+       FROM jsonb_to_recordset($1::jsonb) AS input(user_id bigint,roll text,name text,email text,section text,cgpa numeric)
+       RETURNING user_id,student_id`,
+      [JSON.stringify(created), batch.academic_batch_id, batch.name, batch.department],
+    );
+    if (rows.length !== created.length) invalid("A student record could not be created");
+    for (const row of rows) studentIds.set(row.user_id, row.student_id);
+  }
+  await writeRegistrationAudits(client, actor, "STUDENT", users);
+  return new Map(users.map((user) => [user.email, {
+    userId: String(user.user_id),
+    studentId: String(studentIds.get(user.user_id)),
+  }]));
+}
+
 async function registerAccount(body, role, actor, options = {}) {
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const email =
@@ -161,62 +224,26 @@ async function registerAccount(body, role, actor, options = {}) {
       }
       if (options.validateOnly)
         return { valid: true, linksExistingStudent: Boolean(student) };
-      const created = await client.query(
-        `INSERT INTO users (full_name,email,mobile_number,password_hash,role,title,must_change_password)
-        VALUES ($1,$2,$3,$4,$5::user_role,$6,TRUE) RETURNING user_id`,
-        [
-          name,
-          email,
-          mobile,
-          passwordHash,
-          role,
-          role === "STUDENT" ? "Student" : "Trainer",
-        ],
-      );
-      const userId = created.rows[0].user_id;
+      const account = { name, email, mobile, password_hash: passwordHash };
+      let userId, studentId;
       if (role === "STUDENT") {
-        if (student) {
-          // Account linking must not reset scores, CGPA, projects or assessment relationships.
-          await client.query(
-            `UPDATE students SET user_id=$1, academic_batch_id=COALESCE(academic_batch_id,$2), batch=$3 WHERE student_id=$4`,
-            [userId, batchIds[0], batch.name, student.student_id],
-          );
-        } else {
-          const inserted = await client.query(
-            `INSERT INTO students (user_id,academic_batch_id,roll_no,full_name,email,batch,branch,section,cgpa)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING student_id`,
-            [
-              userId,
-              batchIds[0],
-              roll,
-              name,
-              email,
-              batch.name,
-              batch.department,
-              section,
-              body.cgpa ?? 0,
-            ],
-          );
-          student = inserted.rows[0];
-        }
+        const accounts = await insertStudentAccounts(client, [{
+          ...account, roll, section, cgpa: body.cgpa ?? 0, studentId: student?.student_id,
+        }], batch, actor);
+        ({ userId, studentId } = accounts.get(email));
       } else {
+        const users = await insertRegistrationUsers(client, [account], role);
+        userId = String(users[0].user_id);
         await client.query(
           `UPDATE academic_batches SET trainer_ids=COALESCE(trainer_ids,'[]'::jsonb) || to_jsonb($1::text) WHERE academic_batch_id=ANY($2::bigint[])`,
-          [String(userId), batchIds],
+          [userId, batchIds],
         );
+        await writeRegistrationAudits(client, actor, role, users);
       }
-      await client.query(
-        `INSERT INTO audit_logs (actor_id,actor_name,module,action,status) VALUES ($1,$2,'Users',$3,'success')`,
-        [
-          actor.id,
-          actor.name,
-          `Registered ${role.toLowerCase()} account ${userId}`,
-        ],
-      );
       return {
-        id: String(userId),
-        userId: String(userId),
-        ...(student ? { studentId: String(student.student_id) } : {}),
+        id: userId,
+        userId,
+        ...(studentId ? { studentId } : {}),
         name,
         email,
         role: role.toLowerCase(),
@@ -234,4 +261,4 @@ async function registerAccount(body, role, actor, options = {}) {
     throw error;
   }
 }
-module.exports = { registerAccount, normalizeMobile, findStudentByIdentity };
+module.exports = { registerAccount, normalizeMobile, findStudentByIdentity, insertStudentAccounts, positiveId };

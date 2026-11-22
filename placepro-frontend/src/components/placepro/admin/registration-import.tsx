@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { LoaderCircle } from "lucide-react";
 import type { Batch } from "@/types";
 import { api, type RegistrationImportResult } from "@/lib/placepro/api";
 import { useAppStore } from "@/lib/placepro/store";
@@ -44,12 +45,26 @@ export default function RegistrationImport({
   const [batchId, setBatchId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState<RegistrationImportResult | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [activity, setActivity] = useState<"template" | "preview" | "confirm" | null>(null);
   const [error, setError] = useState("");
   const [mode, setMode] = useState<"valid-only" | "strict">("valid-only");
+  const [chunkChoice, setChunkChoice] = useState("500");
+  const [customChunkSize, setCustomChunkSize] = useState("");
+  const [previewPage, setPreviewPage] = useState(0);
   const { toast } = useToast();
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true);
+  const busy = activity !== null;
+  const chunkInput = chunkChoice === "custom" ? customChunkSize : chunkChoice;
+  const selectedChunkSize = Number(chunkInput);
+  const chunkSizeIsValid = /^\d+$/.test(chunkInput) && selectedChunkSize >= 50 && selectedChunkSize <= 1000;
+  const validation = result?.summary;
+  const strictBlocked = mode === "strict" && validation?.valid !== validation?.total;
+  const processingRows = strictBlocked ? 0 : validation?.valid ?? 0;
+  const totalChunks = chunkSizeIsValid ? Math.ceil(processingRows / selectedChunkSize) : null;
+  const previewPageSize = 100;
+  const previewRows = result?.rows.slice(previewPage * previewPageSize, (previewPage + 1) * previewPageSize) ?? [];
+  const previewPageCount = result ? Math.max(1, Math.ceil(result.rows.length / previewPageSize)) : 1;
+  const run = async (phase: NonNullable<typeof activity>, action: () => Promise<void>) => {
+    setActivity(phase);
     onBusy(true);
     setError("");
     try {
@@ -59,7 +74,7 @@ export default function RegistrationImport({
         err instanceof Error ? err.message : "Unable to process import.",
       );
     } finally {
-      setBusy(false);
+      setActivity(null);
       onBusy(false);
     }
   };
@@ -79,14 +94,14 @@ export default function RegistrationImport({
   return (
     <div className="min-w-0 space-y-4">
       <p className="text-sm text-muted-foreground">
-        Upload .xlsx, .xls or .csv. Maximum 5 MB and 200 records. Preview
+        Upload .xlsx, .xls or .csv. Maximum 5 MB and 5,000 records. Preview
         validates records without creating accounts.
       </p>
       <Button
         variant="outline"
         disabled={busy}
         onClick={() =>
-          void run(async () => {
+          void run("template", async () => {
             const template = await api.registrationTemplate(kind);
             const bytes = Uint8Array.from(atob(template.contentBase64), (c) =>
               c.charCodeAt(0),
@@ -110,6 +125,7 @@ export default function RegistrationImport({
             onValueChange={(value) => {
               setBatchId(value);
               setResult(null);
+              setPreviewPage(0);
             }}
           >
             <SelectTrigger id="import-registration-batch">
@@ -141,6 +157,23 @@ export default function RegistrationImport({
         <p className="text-sm">Create an active batch before importing.</p>
       ) : null}
       <div className="space-y-1">
+        <Label htmlFor="registration-chunk-size">Chunk size</Label>
+        <div className="flex flex-wrap gap-2">
+          <Select disabled={busy} value={chunkChoice} onValueChange={setChunkChoice}>
+            <SelectTrigger id="registration-chunk-size" className="w-48"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="100">100 records</SelectItem>
+              <SelectItem value="250">250 records</SelectItem>
+              <SelectItem value="500">500 records</SelectItem>
+              <SelectItem value="1000">1,000 records</SelectItem>
+              <SelectItem value="custom">Custom size</SelectItem>
+            </SelectContent>
+          </Select>
+          {chunkChoice === "custom" ? <Input aria-label="Custom chunk size" aria-invalid={!chunkSizeIsValid} type="number" min={50} max={1000} step={1} disabled={busy} value={customChunkSize} onChange={(event) => setCustomChunkSize(event.target.value)} placeholder="50–1,000" className="w-36" /> : null}
+        </div>
+        {!chunkSizeIsValid ? <p className="text-xs text-destructive">Choose a whole number from 50 to 1,000.</p> : null}
+      </div>
+      <div className="space-y-1">
         <Label htmlFor="registration-file">Excel/CSV file</Label>
         <Input
           id="registration-file"
@@ -150,6 +183,7 @@ export default function RegistrationImport({
           onChange={(event) => {
             setFile(event.target.files?.[0] ?? null);
             setResult(null);
+            setPreviewPage(0);
             setError("");
           }}
         />
@@ -161,26 +195,30 @@ export default function RegistrationImport({
           !!batchError ||
           batchesLoading ||
           !batches.length ||
+          !chunkSizeIsValid ||
           (role === "student" && !batchId)
         }
         onClick={() =>
-          void run(async () => {
+          void run("preview", async () => {
             if (!file) return;
             if (file.size > 5 * 1024 * 1024)
               throw new Error("File exceeds 5 MB.");
             const form = new FormData();
             form.append("file", file);
+            form.append("chunkSize", String(selectedChunkSize));
             if (role === "student") form.append("academicBatchId", batchId);
             setResult(await api.previewRegistrationImport(kind, form));
+            setPreviewPage(0);
           })
         }
       >
-        {busy ? "Processing..." : "Preview and Validate"}
+        Preview and Validate
       </Button>
       {busy && (
-        <p role="status" className="text-sm text-muted-foreground">
-          Processing records. Password hashing may take a few minutes for larger
-          imports. Keep this dialog open.
+        <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+          <LoaderCircle aria-hidden className="size-4 shrink-0 motion-safe:animate-spin" />
+          {activity === "confirm" ? "Importing records. Securing login credentials can take several minutes for large files. Keep this dialog open." :
+            activity === "preview" ? "Reading and validating the file…" : "Downloading the template…"}
         </p>
       )}
       {error && (
@@ -190,16 +228,20 @@ export default function RegistrationImport({
       )}
       {result && (
         <>
+          <p className="break-all text-sm font-medium">{result.fileName ?? file?.name}</p>
           {result.confirmed ? (
             <p role="status" className="rounded-md bg-muted p-3 text-sm">
-              Imported: {result.imported} · Skipped or failed: {result.skipped}
+              Imported {result.imported?.toLocaleString()} · Skipped {((result.skipped ?? 0) - (result.failed ?? 0)).toLocaleString()} · Failed {(result.failed ?? 0).toLocaleString()}
+              {result.totalChunks !== undefined ? <> · {result.totalChunks} {result.totalChunks === 1 ? "chunk" : "chunks"} of up to {result.chunkSize?.toLocaleString()} records</> : null}
+              {result.mode ? <> · {result.mode === "strict" ? "All or nothing" : "Valid rows only"}</> : null}
             </p>
           ) : (
-            <p className="rounded-md bg-muted p-3 text-sm">
-              Total: {result.summary?.total} · Valid: {result.summary?.valid} ·
-              Invalid: {result.summary?.invalid} · Already exists:{" "}
-              {result.summary?.alreadyExists}
-            </p>
+            <div className="space-y-1 rounded-md bg-muted p-3 text-sm">
+              <p>Detected {validation?.total.toLocaleString()} records · {validation?.valid.toLocaleString()} valid · {validation?.invalid.toLocaleString()} invalid · {validation?.alreadyExists.toLocaleString()} already registered</p>
+              {validation?.duplicates ? <p>{validation.duplicates.toLocaleString()} of the invalid records are duplicates within the file.</p> : null}
+              {strictBlocked ? <p>All-or-nothing mode requires every record to pass validation.</p> : null}
+              {totalChunks !== null ? <p>{processingRows.toLocaleString()} records to process in {totalChunks} {totalChunks === 1 ? "chunk" : "chunks"} of up to {selectedChunkSize.toLocaleString()} records.</p> : null}
+            </div>
           )}
           <div className="max-h-72 overflow-auto rounded-md border">
             <table className="w-full text-left text-xs">
@@ -216,7 +258,7 @@ export default function RegistrationImport({
                 </tr>
               </thead>
               <tbody>
-                {result.rows.map((row) => (
+                {previewRows.map((row) => (
                   <tr key={row.rowNumber} className="border-t">
                     <td className="p-2">{row.rowNumber}</td>
                     {keys.map((key) => (
@@ -236,6 +278,15 @@ export default function RegistrationImport({
               </tbody>
             </table>
           </div>
+          {result.rows.length > previewPageSize && (
+            <div className="flex items-center justify-between text-sm text-muted-foreground">
+              <span>Showing {previewPage * previewPageSize + 1}-{Math.min((previewPage + 1) * previewPageSize, result.rows.length)} of {result.rows.length}</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={previewPage === 0} onClick={() => setPreviewPage((page) => page - 1)}>Previous</Button>
+                <Button variant="outline" size="sm" disabled={previewPage + 1 >= previewPageCount} onClick={() => setPreviewPage((page) => page + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
           {result.rows.some(
             (row) => !["Valid", "Imported"].includes(row.status),
           ) && (
@@ -282,31 +333,33 @@ export default function RegistrationImport({
                 disabled={
                   busy ||
                   !result.summary?.valid ||
-                  (mode === "strict" &&
-                    result.summary.valid !== result.summary.total)
+                  !chunkSizeIsValid ||
+                  strictBlocked
                 }
                 onClick={() =>
-                  void run(async () => {
+                  void run("confirm", async () => {
                     const confirmed = await api.confirmRegistrationImport(
                       kind,
                       result.importId,
                       mode,
+                      selectedChunkSize,
                     );
                     setResult(confirmed);
+                    setPreviewPage(0);
                     if (confirmed.confirmed) {
-                      // Only registration-dependent collections need fresh data here.
-                      // Avoid reloading dashboards, companies, skills and assessments.
-                      const [users, students, batches] = await Promise.all([
-                        api.users(),
-                        api.students(),
-                        api.batches(),
-                      ]);
-                      useAppStore.setState({ users, students: students.items, batches });
                       onRegistered?.("");
                       toast({
                         title: "Import completed",
                         description: `${confirmed.imported} accounts registered. ${confirmed.skipped} rows skipped or failed.`,
                       });
+                      // Only registration-dependent collections need fresh data here.
+                      // Avoid reloading dashboards, companies, skills and assessments.
+                      try {
+                        const [users, students, batches] = await Promise.all([api.users(), api.students(), api.batches()]);
+                        useAppStore.setState({ users, students: students.items, batches });
+                      } catch {
+                        setError("Import completed. Reload the page to refresh the shared lists.");
+                      }
                     } else
                       setError(
                         "Some records changed after preview. Review the validation results before confirming again.",

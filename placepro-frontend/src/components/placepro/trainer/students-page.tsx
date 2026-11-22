@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { UsersRound } from "lucide-react";
 import { useAppStore } from "@/lib/placepro/store";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/placepro/api";
 import { useSubjectColumns } from "./use-subject-columns";
 import StudentFilterPanel from "./student-filter-panel";
@@ -39,6 +39,16 @@ const SORT_OPTIONS: FilterOption[] = [
 
 const DEFAULT_SORT = "name-asc";
 const VALID_SORTS = new Set(SORT_OPTIONS.map(option => option.value));
+const API_SORTS: Record<string, string> = { "name-asc": "name_asc", "name-desc": "name_desc", "cgpa-desc": "cgpa_desc", "cgpa-asc": "cgpa_asc" };
+
+function updateListUrl(params: URLSearchParams, replace = false) {
+  const search = params.toString();
+  const href = `${window.location.pathname}${search ? `?${search}` : ""}${window.location.hash}`;
+  if (replace) window.history.replaceState(null, "", href);
+  else window.history.pushState(null, "", href);
+}
+
+const optionalFilter = (value: string) => value === "all" ? undefined : value;
 
 export default function StudentsPage() {
   const user = useAppStore(s => s.user);
@@ -46,10 +56,11 @@ export default function StudentsPage() {
   const batches = useAppStore((s) => s.batches);
   const columns = useSubjectColumns();
   const { visible } = columns;
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const query = searchParams.get("q") ?? "";
+  const [searchText, setSearchText] = useState(query);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const localQuery = useRef<string | null>(null);
   const batch = searchParams.get("batch") ?? "all";
   const section = searchParams.get("section") ?? "all";
   const pr = searchParams.get("pr") ?? "all";
@@ -73,43 +84,49 @@ export default function StudentsPage() {
   const batchOptions = useMemo(() => batches.map(b => ({ label: b.name, value: b.name })), [batches]);
   const filters = readStudentFilters(new URLSearchParams(searchParams.toString()));
   const sectionOptions = useMemo<FilterOption[]>(() => [...new Set(batches.flatMap(b => b.sections))].sort().map(s => ({ label: `Section ${s}`, value: s })), [batches]);
-  const applyFilters = (nextFilters: StudentFilters) => router.push(`${pathname}?${applyStudentFilters(new URLSearchParams(searchParams.toString()), nextFilters)}`, { scroll: false });
+  const applyFilters = (nextFilters: StudentFilters) => updateListUrl(applyStudentFilters(new URLSearchParams(window.location.search), nextFilters));
   const updateQuery = (key: string, value: string) => {
-    const next = new URLSearchParams(searchParams.toString());
+    const next = new URLSearchParams(window.location.search);
     if (!value || value === "all") next.delete(key); else next.set(key, value);
     if (key !== "page") next.delete("page");
-    router.push(`${pathname}?${next}`, { scroll: false });
+    updateListUrl(next);
   };
+  useEffect(() => {
+    // Back/forward and external navigation restore the URL query. An update we
+    // wrote ourselves must leave any newer keystrokes in the draft alone.
+    if (query !== localQuery.current) setSearchText(query);
+    localQuery.current = null;
+  }, [query]);
+  const searchTerm = searchText.trim();
+  useEffect(() => {
+    if (searchTerm === query) return;
+    const timer = window.setTimeout(() => {
+      const next = new URLSearchParams(window.location.search);
+      if ((next.get("q") ?? "") !== query) return;
+      if (searchTerm) next.set("q", searchTerm); else next.delete("q");
+      next.delete("page");
+      localQuery.current = searchTerm;
+      updateListUrl(next, true);
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm, query]);
   const filtersActive = !!query || [batch, section, pr, domain, projectFilter].some(v => v !== "all");
-  const resetFilters = () => router.push(pathname, { scroll: false });
+  const resetFilters = () => {
+    setSearchText("");
+    updateListUrl(new URLSearchParams());
+  };
   const setPage = (value: number) => updateQuery("page", String(value));
   useEffect(() => {
-    if (requestedSort === sort) return;
-    const next = new URLSearchParams(searchParams.toString());
-    next.set("sort", sort);
-    router.replace(`${pathname}?${next}`, { scroll: false });
-  }, [requestedSort, sort, searchParams, router, pathname]);
-  useEffect(() => {
-    let live = true;
+    const request = new AbortController();
     setLoading(true); setError(null);
-    const optional = (value: string) => value === "all" ? undefined : value;
-    const sorts: Record<string, string> = { "name-asc": "name_asc", "name-desc": "name_desc", "cgpa-desc": "cgpa_desc", "cgpa-asc": "cgpa_asc" };
-    // Debounce typing and discard responses for superseded URL states.
-    const timer = setTimeout(() => {
-      void api.listStudents({ q: query, batchId: optional(batch), section: optional(section), prStatus: optional(pr), domainId: optional(domain), projectFilter: optional(projectFilter), sort: sorts[sort], page, pageSize: PAGE_SIZE })
-        .then(response => {
-          if (!live) return;
-          setResult(response);
-          if (response.page !== page || (searchParams.has("page") && searchParams.get("page") !== String(page))) {
-            const next = new URLSearchParams(searchParams.toString()); next.set("page", String(response.page));
-            router.replace(`${pathname}?${next}`, { scroll: false });
-          }
-        })
-        .catch(err => { if (live) setError(err instanceof Error ? err.message : "Unable to load students."); })
-        .finally(() => { if (live) setLoading(false); });
-    }, 180);
-    return () => { live = false; clearTimeout(timer); };
-  }, [query, batch, section, pr, domain, projectFilter, sort, page, retry, searchParams, router, pathname]);
+    void api.listStudents({ q: query, batchId: optionalFilter(batch), section: optionalFilter(section), prStatus: optionalFilter(pr), domainId: optionalFilter(domain), projectFilter: optionalFilter(projectFilter), sort: API_SORTS[sort], page, pageSize: PAGE_SIZE }, request.signal)
+      .then(response => {
+        if (!request.signal.aborted) setResult(response);
+      })
+      .catch(err => { if (!request.signal.aborted) setError(err instanceof Error ? err.message : "Unable to load students."); })
+      .finally(() => { if (!request.signal.aborted) setLoading(false); });
+    return () => request.abort();
+  }, [query, batch, section, pr, domain, projectFilter, sort, page, retry]);
   const pageRows = result.items;
   const currentPage = result.page;
   const pageCount = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
@@ -136,13 +153,19 @@ export default function StudentsPage() {
       <PageHeader
         title="Students"
         subtitle={`${result.total} matching students across ${batches.length} batches.`}
-        actions={<RegistrationButton role="student" allowImport={user?.role === "admin"} onRegistered={email => { router.push(`${pathname}?q=${encodeURIComponent(email)}&sort=${sort}`); setRetry(value => value + 1); }} />}
+        actions={<RegistrationButton role="student" allowImport={user?.role === "admin"} onRegistered={email => {
+          if (email) {
+            setSearchText(email);
+            updateListUrl(new URLSearchParams({ q: email, sort }));
+          }
+          setRetry(value => value + 1);
+        }} />}
       />
 
       <Card className="gap-0 border-border bg-card p-0 shadow-none">
         {/* filter toolbar */}
         <div className="flex flex-wrap items-center gap-3 border-b border-border/70 p-4 sm:p-5">
-          <SearchInput value={query} onChange={value => updateQuery("q", value)} placeholder="Search by name, roll number or email" className="min-w-[200px] flex-1 sm:max-w-md" />
+          <SearchInput inputRef={searchInput} value={searchText} onChange={setSearchText} placeholder="Search by name, roll number or email" className="min-w-[200px] flex-1 sm:max-w-md" />
           <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
             <Select value={sort} onValueChange={value => updateQuery("sort", value)}>
               <SelectTrigger aria-label="Sort students" className="h-9 w-[195px] text-sm">
@@ -160,8 +183,11 @@ export default function StudentsPage() {
         </div>
 
         {/* content */}
-        {error ? (<div role="alert" className="p-5 text-danger">{error} <Button variant="outline" onClick={() => setRetry(n => n + 1)}>Retry</Button></div>) : loading ? (
-          <TableSkeleton rows={8} />
+        {error ? (<div role="alert" className="p-5 text-danger">{error} <Button variant="outline" onClick={() => {
+          searchInput.current?.focus();
+          setRetry(n => n + 1);
+        }}>Retry</Button></div>) : loading ? (
+          <div role="status" aria-label="Loading students"><TableSkeleton rows={8} /></div>
         ) : result.total === 0 ? (
           <EmptyState
             icon={UsersRound}

@@ -17,6 +17,7 @@ test("bulk registration API and transaction guarantees", async (t) => {
   const originalQuery = pool.query,
     originalConnect = pool.connect;
   let server;
+  let observeTransactionQuery;
   t.after(async () => {
     if (server) await new Promise((r) => server.close(r));
     pool.query = originalQuery;
@@ -43,7 +44,10 @@ test("bulk registration API and transaction guarantees", async (t) => {
   await client.query(migration);
   pool.query = (...args) => client.query(...args);
   pool.connect = async () => ({
-    query: (...args) => client.query(...args),
+    query: (...args) => {
+      observeTransactionQuery?.(...args);
+      return client.query(...args);
+    },
     release() {},
   });
   await client.query(
@@ -57,6 +61,7 @@ test("bulk registration API and transaction guarantees", async (t) => {
   app.use(require("cookie-parser")());
   app.use(require("../src/services/admin/routes/admin.routes"));
   app.use(require("../src/services/auth/routes/auth.routes"));
+  app.use(require("../src/services/students/routes/students.routes"));
   app.use(require("../src/middleware/error.middleware").errorHandler);
   server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
@@ -119,15 +124,16 @@ test("bulk registration API and transaction guarantees", async (t) => {
       }),
     };
   }
-  async function preview(rows, kind = "students", actor = 1, headers) {
-    const f = file(rows, kind, "xlsx", headers);
+  async function preview(rows, kind = "students", actor = 1, headers, chunkSize, format = "xlsx") {
+    const f = file(rows, kind, format, headers);
     const form = new FormData();
     form.append("file", new Blob([f.buffer]), f.originalname);
     if (kind === "students") form.append("academicBatchId", "1");
+    if (chunkSize !== undefined) form.append("chunkSize", chunkSize);
     return req(`/users/imports/${kind}/preview`, form, actor);
   }
-  const confirm = (p, mode = "valid-only", kind = "students") =>
-    req(`/users/imports/${kind}/confirm`, { importId: p.body.importId, mode });
+  const confirm = (p, mode = "valid-only", kind = "students", chunkSize) =>
+    req(`/users/imports/${kind}/confirm`, { importId: p.body.importId, mode, chunkSize });
   await t.test(
     "templates and parser preserve text; headers, formulas and row limit enforced",
     async () => {
@@ -150,14 +156,30 @@ test("bulk registration API and transaction guarantees", async (t) => {
           .status,
         400,
       );
+      assert.equal(
+        parseFile(
+          file(Array.from({ length: 5000 }, (_, i) => row(String(i)))),
+          "STUDENT",
+        ).length,
+        5000,
+      );
       assert.throws(
         () =>
           parseFile(
-            file(Array.from({ length: 201 }, (_, i) => row(String(i)))),
+            file(Array.from({ length: 5001 }, (_, i) => row(String(i)))),
             "STUDENT",
           ),
-        /Maximum/,
+        /contains 5,001 records.*maximum allowed is 5,000/i,
       );
+      for (const format of ["xlsx", "xls", "csv"]) {
+        const parsed = parseFile(file([row("001"), [], ["   "], row("002")], "students", format), "STUDENT");
+        assert.deepEqual(parsed.map(({ rowNumber }) => rowNumber), [2, 5]);
+      }
+      const overLimit = await preview(Array.from({ length: 5001 }, (_, i) => row(`REJECT-${i}`)), "students", 1, undefined, undefined, "csv");
+      assert.equal(overLimit.status, 400);
+      assert.match(overLimit.body.error.message, /5,001 records/);
+      const sparseCsv = { originalname: "sparse.csv", buffer: Buffer.from(`${sh.join(",")}\n${row("FIRST").join(",")}\n${"\n".repeat(50_000)}${row("LAST").join(",")}`) };
+      assert.throws(() => parseFile(sparseCsv, "STUDENT"), /too sparse/);
       const formulaFile = file([row("FORMULA")]);
       const formulaBook = XLSX.read(formulaFile.buffer);
       formulaBook.Sheets.Registration.B2.f = "1+1";
@@ -186,11 +208,21 @@ test("bulk registration API and transaction guarantees", async (t) => {
       ]);
       assert.equal(p.status, 200);
       assert.equal(p.body.summary.valid, 1);
+      assert.equal(p.body.summary.duplicates, 2);
+      assert.equal(p.body.processingRows, 1);
+      assert.equal(p.body.chunkSize, 500);
+      assert.equal(p.body.totalChunks, 1);
+      assert.equal(p.body.fileName, "input.xlsx");
       assert.equal(p.body.rows[1].status, "Invalid Phone Number");
       assert.equal(p.body.rows[2].status, "Duplicate in File");
       assert.equal(p.body.rows[4].status, "Invalid Email");
       assert.equal(p.body.rows[5].status, "Invalid CGPA");
       assert(!p.body.errorReport.includes("9876543210"));
+      assert.equal(p.body.rows[0].submitted.mobileNumber, "[redacted]");
+      const stored = (await client.query("SELECT submitted_rows FROM registration_imports WHERE import_id=$1", [p.body.importId])).rows[0].submitted_rows;
+      assert.equal(stored[0].submitted.mobileNumber, undefined);
+      assert.ok(stored[0].sealedMobile);
+      assert(!JSON.stringify(stored).includes("9876543210"));
       assert.equal((await client.query("SELECT * FROM students")).rowCount, 0);
       assert.equal((await confirm(p, "strict")).body.confirmed, false);
       assert.equal((await client.query("SELECT * FROM students")).rowCount, 0);
@@ -204,6 +236,7 @@ test("bulk registration API and transaction guarantees", async (t) => {
         )
       ).rows[0];
       assert.equal(await bcrypt.compare("9876543210", u.password_hash), true);
+      assert.equal(bcrypt.getRounds(u.password_hash), 12);
       assert.equal(u.must_change_password, true);
       const s = (
         await client.query("SELECT * FROM students WHERE roll_no='0002'")
@@ -287,23 +320,30 @@ test("bulk registration API and transaction guarantees", async (t) => {
   );
   await t.test(
     "failed row has no orphan account; strict rolls back the entire import and can retry",
-    async () => {
+    async (subtest) => {
+      subtest.mock.method(bcrypt, "hash", async (_mobile, cost) => {
+        assert.equal(cost, 12);
+        return "isolated-transaction-test-hash";
+      });
       await client.query(
         `CREATE FUNCTION reject_bulk_row() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.roll_no='FAIL' THEN RAISE EXCEPTION 'Forced failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_bulk_row BEFORE INSERT ON students FOR EACH ROW EXECUTE FUNCTION reject_bulk_row()`,
       );
-      const p = await preview([row("GOOD"), row("FAIL")]);
-      assert.equal((await confirm(p, "strict")).status, 409);
+      const p = await preview([...Array.from({ length: 50 }, (_, i) => row(`PASS-${i}`)), row("FAIL"), row("GOOD")]);
+      assert.equal((await confirm(p, "strict", "students", 50)).status, 409);
       assert.equal(
         (
           await client.query(
-            "SELECT * FROM users WHERE email IN ('good@test.invalid','fail@test.invalid')",
+            "SELECT * FROM users WHERE email LIKE 'pass-%' OR email IN ('good@test.invalid','fail@test.invalid')",
           )
         ).rowCount,
         0,
       );
-      const result = await confirm(p);
-      assert.equal(result.body.imported, 1);
+      const result = await confirm(p, "valid-only", "students", 50);
+      assert.equal(result.body.totalChunks, 2);
+      assert.equal(result.body.imported, 51);
       assert.equal(result.body.skipped, 1);
+      assert.equal(result.body.failed, 1);
+      assert.equal(result.body.rows.find(({ submitted }) => submitted.rollNumber === "FAIL").status, "Failed");
       assert.equal(
         (
           await client.query(
@@ -360,6 +400,73 @@ test("bulk registration API and transaction guarantees", async (t) => {
       assert.equal((await client.query("SELECT * FROM users WHERE email='concurrent@test.invalid'")).rowCount, 1);
     } finally {
       pool.connect = testConnect;
+    }
+  });
+
+  await t.test("chunk size rejects invalid multipart and JSON values", async () => {
+    const p = await preview([row("INVALID-CHUNK")]);
+    for (const value of ["", "0", "-1", "49", "50.5", "500.0", "1001", "5e2"]) {
+      const result = await preview([row("INVALID-CHUNK")], "students", 1, undefined, value);
+      assert.equal(result.status, 400, `preview accepted ${JSON.stringify(value)}`);
+    }
+    for (const value of [null, false, [], [500], {}, 0, -50, 49, 50.5, 1001]) {
+      const result = await confirm(p, "valid-only", "students", value);
+      assert.equal(result.status, 400, `confirmation accepted ${JSON.stringify(value)}`);
+    }
+    const max = await preview([row("MAX-CHUNK")], "students", 1, undefined, "1000");
+    assert.equal(max.body.chunkSize, 1000);
+  });
+
+  await t.test("student chunk sizes drive bulk SQL and every account is assigned exactly once", async (subtest) => {
+    // Exercise real bcrypt separately above. Large fixtures isolate database throughput.
+    subtest.mock.method(bcrypt, "hash", async (_mobile, cost) => {
+      assert.equal(cost, 12);
+      return "isolated-chunk-test-hash";
+    });
+    for (const count of [100, 500, 501, 1862, 5000]) {
+      const prefix = `CHUNK-${count}-`;
+      const p = await preview(Array.from({ length: count }, (_, i) => row(`${prefix}${i}`)), "students", 1, undefined, undefined, "csv");
+      assert.equal(p.status, 200);
+      assert.equal(p.body.summary.total, count);
+      assert.equal(p.body.summary.valid, count);
+      assert.equal(p.body.totalChunks, Math.ceil(count / 500));
+      const chunkLengths = [];
+      observeTransactionQuery = (sql, params) => {
+        if (sql.startsWith("INSERT INTO users")) chunkLengths.push(JSON.parse(params[0]).length);
+      };
+      let completed;
+      try {
+        completed = await confirm(p, "strict");
+      } finally {
+        observeTransactionQuery = undefined;
+      }
+      assert.equal(completed.status, 200);
+      assert.equal(completed.body.imported, count);
+      assert.equal(completed.body.failed, 0);
+      assert.equal(completed.body.totalChunks, Math.ceil(count / 500));
+      assert.deepEqual(chunkLengths, Array.from({ length: Math.ceil(count / 500) }, (_, i) => Math.min(500, count - i * 500)));
+      const { rows: [totals] } = await client.query(
+        `SELECT count(*)::int total, count(DISTINCT s.user_id)::int linked,
+                count(*) FILTER (WHERE s.academic_batch_id=1 AND s.section='A' AND s.batch='Batch A'
+                  AND s.branch='CSE' AND s.cgpa=8 AND u.email=s.email AND u.must_change_password)::int assigned
+         FROM students s JOIN users u USING (user_id) WHERE s.roll_no LIKE $1`,
+        [`${prefix}%`],
+      );
+      assert.deepEqual(totals, { total: count, linked: count, assigned: count });
+    }
+
+    await client.query("UPDATE academic_batches SET trainer_ids='[\"2\"]' WHERE academic_batch_id=1");
+    const page = await req("/students?batchId=1&section=A&page=500&pageSize=10", undefined, 2);
+    assert.equal(page.status, 200);
+    assert.ok(page.body.total > 5000);
+    assert.equal(page.body.page, 500);
+    assert.equal(page.body.items.length, 10);
+    for (const term of ["CHUNK-5000-4999", "Student CHUNK-5000-4999", "chunk-5000-4999@test.invalid"]) {
+      const match = await req(`/students?batchId=1&section=A&page=99&q=${encodeURIComponent(term)}`, undefined, 2);
+      assert.equal(match.status, 200);
+      assert.equal(match.body.total, 1);
+      assert.equal(match.body.page, 1);
+      assert.equal(match.body.items[0].rollNumber, "CHUNK-5000-4999");
     }
   });
 

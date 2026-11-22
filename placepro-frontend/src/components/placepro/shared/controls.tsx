@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, type RefObject } from "react";
 import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -20,16 +21,21 @@ export function SearchInput({
   onChange,
   placeholder = "Search…",
   className,
+  inputRef,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   className?: string;
+  inputRef?: RefObject<HTMLInputElement | null>;
 }) {
+  const localRef = useRef<HTMLInputElement>(null);
+  const ref = inputRef ?? localRef;
   return (
     <div className={cn("relative", className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
+        ref={ref}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
@@ -39,7 +45,10 @@ export function SearchInput({
       {value ? (
         <button
           type="button"
-          onClick={() => onChange("")}
+          onClick={() => {
+            onChange("");
+            ref.current?.focus();
+          }}
           className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Clear search"
         >

@@ -16,7 +16,9 @@ export default function Portal() {
   const pathname = usePathname();
   const search = useSearchParams();
   const [checking, setChecking] = useState(!user);
-  const route = useMemo(() => user ? resolveRoute(pathname, user.role, Object.fromEntries(search.entries())) : null, [pathname, search, user]);
+  // The student list owns its query parameters. They do not change the portal route.
+  const routeQuery = user && pathname === routeHref(user.role, "students") ? "" : search.toString();
+  const route = useMemo(() => user ? resolveRoute(pathname, user.role, Object.fromEntries(new URLSearchParams(routeQuery))) : null, [pathname, routeQuery, user]);
   useEffect(() => { bindNavigation(href => router.push(href)); }, [router]);
   useEffect(() => {
     if (useAppStore.getState().user) { setChecking(false); return; }
