@@ -2,7 +2,6 @@ const { Router } = require("express");
 const multer = require("multer");
 const XLSX = require("xlsx");
 const { createCipheriv, createDecipheriv, createHmac, randomBytes, randomUUID } = require("node:crypto");
-const bcrypt = require("bcryptjs");
 const { pool, withTransaction } = require("../../config/db");
 const {
   requireAuth,
@@ -11,6 +10,7 @@ const {
 const { registerAccount, normalizeMobile, insertStudentAccounts, positiveId } = require("../../utils/registration");
 const { csvCell } = require("../companies/shortlist-export");
 const { createImportPerformance } = require("../../utils/import-performance");
+const { hashConcurrency, prepareImportHashes } = require("../../utils/import-password-hashing");
 const router = Router();
 const MAX_ROWS = 5000;
 const MAX_SHEET_ROWS = 50000;
@@ -544,6 +544,8 @@ router.post(
 );
 router.post("/users/imports/:kind/confirm", async (req, res, next) => {
   const performance = createImportPerformance(`registration-${req.params.kind}-confirm`, req.requestId);
+  const preparedHashes = new Map();
+  let result;
   try {
     const role = roleFor(req.params.kind),
       { importId, mode } = req.body;
@@ -559,24 +561,19 @@ router.post("/users/imports/:kind/confirm", async (req, res, next) => {
     );
     const preflightSession = preflight.rows[0];
     if (!preflightSession) fail("Import session not found", 404);
-    if (preflightSession.status === "CONFIRMED")
-      return res.set("Cache-Control", "no-store").json(preflightSession.result);
+    if (preflightSession.status === "CONFIRMED") {
+      result = preflightSession.result;
+      return res.set("Cache-Control", "no-store").json(result);
+    }
     if (new Date(preflightSession.expires_at) < new Date())
       fail("Import preview expired. Upload the file again", 410);
     const submitted = openRows(preflightSession);
     const batchId = preflightSession.academic_batch_id ? String(preflightSession.academic_batch_id) : null;
     const preliminary = await performance.measure("preflightValidationMs", () => validateRows(pool, role, submitted, batchId));
-    // Keep bcrypt cost 12 and prepare hashes before taking database locks.
-    const preparedHashes = new Map();
-    if (mode === "valid-only" || preliminary.every((row) => row.status === "Valid")) {
-      await performance.measure("passwordHashingMs", async () => {
-        for (const row of preliminary) {
-          if (row.status === "Valid")
-            preparedHashes.set(row.record.email, await bcrypt.hash(normalizeMobile(row.record.mobileNumber), 12));
-        }
-      });
-    }
-    const result = await performance.measure("transactionMs", () => withTransaction(async (client) => {
+    const eligible = preliminary.filter((row) => row.status === "Valid");
+    if (mode === "valid-only" || eligible.length === preliminary.length)
+      await performance.measure("passwordHashingMs", () => prepareImportHashes(eligible.map((row) => row.record), preparedHashes));
+    result = await performance.measure("transactionMs", () => withTransaction(async (client) => {
       const { rows } = await client.query(
         "SELECT * FROM registration_imports WHERE import_id=$1 AND created_by=$2 AND account_role=$3 FOR UPDATE",
         [importId, req.user.id, role],
@@ -661,10 +658,17 @@ router.post("/users/imports/:kind/confirm", async (req, res, next) => {
       );
       return result;
     }));
-    performance.log({ rows: result.rows?.length, imported: result.imported, skipped: result.skipped });
     res.set("Cache-Control", "no-store").json(result);
   } catch (error) {
     next(error);
+  } finally {
+    performance.log({
+      rows: result?.rows?.length,
+      imported: result?.imported ?? 0,
+      skipped: result?.skipped ?? 0,
+      hashConcurrency,
+      hashCount: preparedHashes.size,
+    });
   }
 });
 module.exports = { router, template, parseFile, validateRows };

@@ -1,5 +1,6 @@
 const bcrypt = require("bcryptjs");
 const { withTransaction } = require("../config/db");
+const REGISTRATION_PASSWORD_COST = 12;
 
 function invalid(message, statusCode = 400) {
   const error = new Error(message);
@@ -162,7 +163,7 @@ async function registerAccount(body, role, actor, options = {}) {
     invalid("CGPA must be between 0 and 10");
   const passwordHash = options.validateOnly
     ? null
-    : options.passwordHash || await bcrypt.hash(mobile, 12);
+    : options.passwordHash || await bcrypt.hash(mobile, REGISTRATION_PASSWORD_COST);
   try {
     const work = async (client) => {
       // Registration requests for the same email serialize even before a users row exists.
@@ -261,4 +262,4 @@ async function registerAccount(body, role, actor, options = {}) {
     throw error;
   }
 }
-module.exports = { registerAccount, normalizeMobile, findStudentByIdentity, insertStudentAccounts, positiveId };
+module.exports = { registerAccount, normalizeMobile, findStudentByIdentity, insertStudentAccounts, positiveId, REGISTRATION_PASSWORD_COST };

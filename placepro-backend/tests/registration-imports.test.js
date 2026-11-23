@@ -4,8 +4,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const XLSX = require("xlsx");
 const bcrypt = require("bcryptjs");
+const nativeBcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { pool } = require("../src/config/db");
+const { hashConcurrency } = require("../src/utils/import-password-hashing");
+const { logger } = require("../src/utils/logger");
 const {
   template,
   parseFile,
@@ -192,14 +195,16 @@ test("bulk registration API and transaction guarantees", async (t) => {
   );
   await t.test(
     "admin only, preview validation, strict rejection, valid-only and repeat confirmation",
-    async () => {
+    async (subtest) => {
       assert.equal(
         (await preview([row("AUTH")], "students", null)).status,
         401,
       );
       assert.equal((await preview([row("AUTH")], "students", 2)).status, 403);
+      const valid = row("0002");
+      valid[2] = "0002@TEST.INVALID";
       const p = await preview([
-        row("0002"),
+        valid,
         row("PHONE", "123"),
         row("DUP"),
         row("dup"),
@@ -224,17 +229,33 @@ test("bulk registration API and transaction guarantees", async (t) => {
       assert.ok(stored[0].sealedMobile);
       assert(!JSON.stringify(stored).includes("9876543210"));
       assert.equal((await client.query("SELECT * FROM students")).rowCount, 0);
+      const metrics = [];
+      subtest.mock.method(logger, "info", (event, data) => {
+        if (event === "import.performance") metrics.push(data);
+      });
       assert.equal((await confirm(p, "strict")).body.confirmed, false);
+      assert.equal(metrics.at(-1).hashCount, 0);
       assert.equal((await client.query("SELECT * FROM students")).rowCount, 0);
       const result = await confirm(p);
       assert.equal(result.body.imported, 1);
       assert.equal(result.body.skipped, 5);
+      const timing = metrics.at(-1);
+      assert.equal(timing.hashConcurrency, hashConcurrency);
+      assert.equal(timing.hashCount, 1);
+      assert.equal(timing.imported, 1);
+      assert.equal(timing.skipped, 5);
+      assert.ok(Number.isInteger(timing.totalMs));
+      for (const stage of ["preflightValidationMs", "passwordHashingMs", "transactionMs"]) {
+        assert.ok(Number.isInteger(timing.stages[stage]));
+      }
       assert.deepEqual((await confirm(p)).body, result.body);
+      assert.equal(metrics.at(-1).hashCount, 0);
       const u = (
         await client.query(
           "SELECT * FROM users WHERE email='0002@test.invalid'",
         )
       ).rows[0];
+      assert.match(u.password_hash, /^\$2b\$12\$/);
       assert.equal(await bcrypt.compare("9876543210", u.password_hash), true);
       assert.equal(bcrypt.getRounds(u.password_hash), 12);
       assert.equal(u.must_change_password, true);
@@ -271,7 +292,7 @@ test("bulk registration API and transaction guarantees", async (t) => {
   );
   await t.test(
     "trainers support multiple existing batches and reject missing identifiers",
-    async () => {
+    async (subtest) => {
       const p = await preview(
         [
           ["Trainer A", "ta@test.invalid", "9123456789", "Batch A;2"],
@@ -281,12 +302,16 @@ test("bulk registration API and transaction guarantees", async (t) => {
       );
       assert.equal(p.body.summary.valid, 1);
       assert.equal(p.body.rows[1].status, "Invalid Batch");
+      const legacyHash = subtest.mock.method(bcrypt, "hash", async () => assert.fail("Import rehashed a precomputed password"));
       const result = await confirm(p, "valid-only", "trainers");
       assert.equal(result.body.imported, 1);
+      assert.equal(legacyHash.mock.callCount(), 0);
+      legacyHash.mock.restore();
       const u = (
         await client.query("SELECT * FROM users WHERE email='ta@test.invalid'")
       ).rows[0];
       assert.equal(u.role, "TRAINER");
+      assert.match(u.password_hash, /^\$2b\$12\$/);
       assert.equal(await bcrypt.compare("9123456789", u.password_hash), true);
       assert(
         (
@@ -321,7 +346,7 @@ test("bulk registration API and transaction guarantees", async (t) => {
   await t.test(
     "failed row has no orphan account; strict rolls back the entire import and can retry",
     async (subtest) => {
-      subtest.mock.method(bcrypt, "hash", async (_mobile, cost) => {
+      subtest.mock.method(nativeBcrypt, "hash", async (_mobile, cost) => {
         assert.equal(cost, 12);
         return "isolated-transaction-test-hash";
       });
@@ -403,6 +428,38 @@ test("bulk registration API and transaction guarantees", async (t) => {
     }
   });
 
+  await t.test("failed hashing keeps the preview retryable and never opens a transaction", async (subtest) => {
+    const p = await preview([row("HASH-FAILURE")]);
+    const privateValue = "private-native-error";
+    let failHashing = true;
+    subtest.mock.method(nativeBcrypt, "hash", async (mobile) => {
+      if (failHashing) throw new Error(`${privateValue} ${mobile}`);
+      return "successful-retry-hash";
+    });
+    const logged = [];
+    subtest.mock.method(logger, "error", (event, error) => logged.push({ event, message: error.message }));
+    subtest.mock.method(logger, "info", (event, data) => logged.push({ event, ...data }));
+    const transactionQueries = [];
+    observeTransactionQuery = (sql) => transactionQueries.push(sql);
+    try {
+      const failed = await confirm(p, "strict");
+      assert.equal(failed.status, 500);
+      assert.equal(failed.body.error.message, "Unable to prepare import credentials. Retry confirmation.");
+      assert.equal(transactionQueries.length, 0);
+      assert.ok(logged.some((entry) => entry.event === "import.performance" && entry.hashCount === 0));
+      assert.doesNotMatch(JSON.stringify(logged), /private-native-error|9876543210/);
+      assert.equal((await client.query("SELECT status FROM registration_imports WHERE import_id=$1", [p.body.importId])).rows[0].status, "PREVIEW");
+      assert.equal((await client.query("SELECT 1 FROM users WHERE email='hash-failure@test.invalid'")).rowCount, 0);
+      failHashing = false;
+      const retried = await confirm(p, "strict");
+      assert.equal(retried.status, 200);
+      assert.equal(retried.body.imported, 1);
+      assert.doesNotMatch(JSON.stringify(logged), /successful-retry-hash/);
+    } finally {
+      observeTransactionQuery = undefined;
+    }
+  });
+
   await t.test("chunk size rejects invalid multipart and JSON values", async () => {
     const p = await preview([row("INVALID-CHUNK")]);
     for (const value of ["", "0", "-1", "49", "50.5", "500.0", "1001", "5e2"]) {
@@ -419,7 +476,7 @@ test("bulk registration API and transaction guarantees", async (t) => {
 
   await t.test("student chunk sizes drive bulk SQL and every account is assigned exactly once", async (subtest) => {
     // Exercise real bcrypt separately above. Large fixtures isolate database throughput.
-    subtest.mock.method(bcrypt, "hash", async (_mobile, cost) => {
+    subtest.mock.method(nativeBcrypt, "hash", async (_mobile, cost) => {
       assert.equal(cost, 12);
       return "isolated-chunk-test-hash";
     });
