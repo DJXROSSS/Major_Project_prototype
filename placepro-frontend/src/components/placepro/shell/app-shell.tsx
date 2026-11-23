@@ -93,7 +93,7 @@ function HelpDialog() {
         <div className="space-y-3 text-sm">
           <div className="rounded-lg border border-border bg-muted/50 p-3">
             <p className="text-[13px] font-medium text-foreground">Placement Cell Support</p>
-            <p className="mt-1 text-[13px] text-muted-foreground">placement.cell@campus.edu · Ext. 2140 (Mon–Fri, 9:00–17:00)</p>
+            <p className="mt-1 text-[13px] text-muted-foreground">placementcell@gla.ac.in (Mon–Fri, 9:00–17:00)</p>
           </div>
           <div className="rounded-lg border border-border bg-muted/50 p-3">
             <p className="text-[13px] font-medium text-foreground">Trainer resources</p>
@@ -152,20 +152,20 @@ function SettingsDialog() {
             </div>
             <Switch id="pin-setting" checked={pinned} onCheckedChange={setSidebarPinned} />
           </div>
-          <div className="flex items-center justify-between gap-4">
+          {/* <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="digest-setting" className="text-[13px] font-medium">Weekly performance digest</Label>
               <p className="text-xs text-muted-foreground">Batch performance summary every Monday.</p>
             </div>
             <Switch id="digest-setting" checked={emailDigest} onCheckedChange={setEmailDigest} />
-          </div>
-          <div className="flex items-center justify-between gap-4">
+          </div> */}
+          {/* <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="import-setting" className="text-[13px] font-medium">Import alerts</Label>
               <p className="text-xs text-muted-foreground">Notify me when an import needs review.</p>
             </div>
             <Switch id="import-setting" checked={importAlerts} onCheckedChange={setImportAlerts} />
-          </div>
+          </div> */}
         </div>
         <div className="flex justify-end gap-2">
           <Button
