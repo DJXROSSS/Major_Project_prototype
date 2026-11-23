@@ -50,7 +50,7 @@ export function NavList({
     <TooltipProvider delayDuration={120}>
       <div className="flex h-full flex-col">
         {/* header */}
-        <div className={cn("flex h-[52px] shrink-0 items-center gap-2.5 px-3.5", !expanded && "justify-center px-0")}>
+        <div className={cn("flex h-[52px] shrink-0 items-center gap-2.5 px-3.5 pt-2", !expanded && "justify-center px-0")}>
           <SidebarMark />
           {expanded ? (
             <div className="min-w-0 leading-tight">
