@@ -35,19 +35,19 @@ export function StatCard({
       className={cn(
         "gap-0 border p-5 shadow-none",
         hero
-          ? "border-primary bg-primary text-primary-foreground"
+          ? "border-brand bg-brand text-brand-foreground dark:border-primary/25"
           : "border-border bg-card text-card-foreground",
         className,
       )}
     >
       <div className="flex items-start justify-between gap-3">
-        <p className={cn("text-[13px] font-medium", hero ? "text-primary-foreground/80" : "text-muted-foreground")}>
+        <p className={cn("text-[13px] font-medium", hero ? "text-brand-foreground/80" : "text-muted-foreground")}>
           {label}
         </p>
         <div
           className={cn(
             "flex size-9 shrink-0 items-center justify-center rounded-lg",
-            hero ? "bg-white/12 text-primary-foreground" : "bg-primary-soft text-primary",
+            hero ? "bg-brand-foreground/12 text-brand-foreground dark:bg-primary-soft dark:text-primary" : "bg-primary-soft text-primary",
           )}
         >
           <Icon className="size-[18px]" />
@@ -62,9 +62,7 @@ export function StatCard({
             className={cn(
               "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-medium",
               hero
-                ? delta >= 0
-                  ? "bg-white/15 text-white"
-                  : "bg-white/15 text-white"
+                ? "bg-brand-foreground/15 text-brand-foreground"
                 : delta >= 0
                   ? "bg-success-soft text-success"
                   : "bg-danger-soft text-danger",
@@ -77,7 +75,7 @@ export function StatCard({
         ) : null}
       </div>
       {(deltaLabel || hint) && (
-        <p className={cn("mt-1.5 text-xs", hero ? "text-primary-foreground/70" : "text-muted-foreground")}>
+        <p className={cn("mt-1.5 text-xs", hero ? "text-brand-foreground/70" : "text-muted-foreground")}>
           {deltaLabel ?? hint}
         </p>
       )}

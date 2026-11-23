@@ -33,8 +33,8 @@ const PLATFORM_LABEL: Record<ProfilePlatform, string> = {
 };
 
 const STATUS_CLASS: Record<StudentCodingProfile["verificationStatus"], string> = {
-  PENDING: "bg-amber-100 text-amber-800",
-  VERIFIED: "bg-emerald-100 text-emerald-800",
+  PENDING: "bg-amber-100 text-amber-800 dark:bg-warning-soft dark:text-warning",
+  VERIFIED: "bg-emerald-100 text-emerald-800 dark:bg-success-soft dark:text-success",
   EXPIRED: "bg-muted text-muted-foreground",
   REJECTED: "bg-destructive/10 text-destructive",
 };

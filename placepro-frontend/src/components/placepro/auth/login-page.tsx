@@ -42,14 +42,14 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen flex-col bg-background lg:grid lg:grid-cols-[1.05fr_1fr]">
       {/* ------------------------------ brand panel ------------------------------ */}
-      <section className="relative hidden flex-col justify-between overflow-hidden bg-primary p-12 text-primary-foreground lg:flex">
+      <section className="relative hidden flex-col justify-between overflow-hidden bg-brand p-12 text-brand-foreground lg:flex">
         <div className="flex items-center gap-3">
-          <span aria-hidden className="flex size-10 items-center justify-center rounded-[11px] bg-white/12 text-xl font-semibold">
+          <span aria-hidden className="flex size-10 items-center justify-center rounded-[11px] bg-brand-foreground/12 text-xl font-semibold dark:bg-primary-soft dark:text-primary">
             P
           </span>
           <div className="leading-tight">
             <p className="text-lg font-semibold tracking-tight">PlacePro</p>
-            <p className="text-xs text-primary-foreground/70">Placement Intelligence</p>
+            <p className="text-xs text-brand-foreground/70">Placement Intelligence</p>
           </div>
         </div>
 
@@ -57,26 +57,26 @@ export default function LoginPage() {
           <h1 className="text-[32px] font-semibold leading-[1.15] tracking-tight">
             One record for every student. One view for every decision.
           </h1>
-          <p className="mt-4 text-[15px] leading-relaxed text-primary-foreground/75">
+          <p className="mt-4 text-[15px] leading-relaxed text-brand-foreground/75">
             PlacePro brings daily coding exams, mock interviews and trainer
             feedback into a single 360° performance profile — so the placement
             cell can act on evidence, not spreadsheets.
           </p>
-          <ul className="mt-8 space-y-3 text-sm text-primary-foreground/85">
+          <ul className="mt-8 space-y-3 text-sm text-brand-foreground/85">
             {[
               "Assessment imports with dynamic column mapping",
               "Placement readiness classification (PR / NPR)",
               "Company-wise eligibility and ranked shortlists",
             ].map((line) => (
               <li key={line} className="flex items-start gap-2.5">
-                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary-foreground/60" />
+                <ShieldCheck className="mt-0.5 size-4 shrink-0 text-brand-foreground/60 dark:text-primary" />
                 {line}
               </li>
             ))}
           </ul>
         </div>
 
-        <p className="text-xs text-primary-foreground/50">
+        <p className="text-xs text-brand-foreground/50 dark:text-brand-foreground/65">
           GLA University · Department of Computer Science
         </p>
       </section>

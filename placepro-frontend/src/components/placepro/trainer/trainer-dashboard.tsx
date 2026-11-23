@@ -32,6 +32,7 @@ import {
   domainGroups,
   weakestDomain,
 } from "@/lib/placepro/skill-taxonomy";
+import { axisTick, tooltipStyle } from "@/components/placepro/shared/chart-styles";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { StatCard } from "@/components/placepro/shared/stat-card";
 import { ChartCard, EmptyState } from "@/components/placepro/shared/states";
@@ -45,16 +46,6 @@ import { Card } from "@/components/ui/card";
 /* ------------------------------------------------------------------ */
 
 const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/* shared recharts styling */
-const axisTick = { fontSize: 12, fill: "#727C74" };
-const tooltipStyle = {
-  borderRadius: 10,
-  border: "1px solid #E4E9E4",
-  boxShadow: "0 4px 16px -8px rgba(32,41,35,0.16)",
-  fontSize: 13,
-  padding: "8px 12px",
-};
 
 export default function TrainerDashboard() {
   const user = useAppStore((s) => s.user);
@@ -146,8 +137,8 @@ export default function TrainerDashboard() {
   }, [filteredStudents, selectedBatch, dashboard, assessments, skills]);
 
   const donut = [
-    { name: "Placement Ready", value: data.prCount, color: "#245C45" },
-    { name: "Not Ready", value: data.nprCount, color: "#D99A36" },
+    { name: "Placement Ready", value: data.prCount, color: "var(--chart-1)" },
+    { name: "Not Ready", value: data.nprCount, color: "var(--chart-3)" },
   ];
 
   const domainBars = useMemo(() => {
@@ -301,16 +292,16 @@ export default function TrainerDashboard() {
           {data.monthly.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.monthly} margin={{ top: 6, right: 12, bottom: 0, left: -14 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis dataKey="month" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
                 <YAxis domain={[30, 100]} tick={axisTick} axisLine={false} tickLine={false} />
                 <ReTooltip formatter={(v: number) => [`${v}%`, "Average score"]} contentStyle={tooltipStyle} />
                 <Line
                   type="monotone"
                   dataKey="average"
-                  stroke="#245C45"
+                  stroke="var(--chart-1)"
                   strokeWidth={2.5}
-                  dot={{ r: 3.5, fill: "#245C45", strokeWidth: 0 }}
+                  dot={{ r: 3.5, fill: "var(--chart-1)", strokeWidth: 0 }}
                   activeDot={{ r: 5 }}
                   animationDuration={700}
                 />
@@ -335,11 +326,11 @@ export default function TrainerDashboard() {
           {domainBars.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={domainBars} layout="vertical" margin={{ top: 0, right: 24, bottom: 0, left: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" horizontal={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                 <XAxis type="number" domain={[0, 100]} tick={axisTick} axisLine={false} tickLine={false} />
                 <YAxis type="category" dataKey="domain" tick={axisTick} axisLine={false} tickLine={false} width={110} />
                 <ReTooltip formatter={(v: number) => [`${v}%`, "Average"]} contentStyle={tooltipStyle} />
-                <Bar dataKey="score" fill="#245C45" radius={[0, 4, 4, 0]} barSize={18} animationDuration={700} />
+                <Bar dataKey="score" fill="var(--chart-1)" radius={[0, 4, 4, 0]} barSize={18} animationDuration={700} />
               </BarChart>
             </ResponsiveContainer>
           ) : (

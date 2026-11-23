@@ -22,6 +22,7 @@ import {
 import { useAppStore } from "@/lib/placepro/store";
 import { api } from "@/lib/placepro/api";
 import type { AppUser } from "@/types";
+import { axisTick, tooltipStyle } from "@/components/placepro/shared/chart-styles";
 import { PageHeader } from "@/components/placepro/shared/page-header";
 import { StatCard } from "@/components/placepro/shared/stat-card";
 import { ChartCard, EmptyState } from "@/components/placepro/shared/states";
@@ -36,8 +37,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 /* Admin Dashboard                                                     */
 /* ------------------------------------------------------------------ */
 
-const GREEN = "#245C45";
-const AMBER = "#D99A36";
+const GREEN = "var(--chart-1)";
+const AMBER = "var(--chart-3)";
 
 export default function AdminDashboard() {
   const users = useAppStore((s) => s.users);
@@ -137,7 +138,7 @@ export default function AdminDashboard() {
         >
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={roleBars} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" vertical={false} />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
               <XAxis dataKey="role" tick={axisTick} axisLine={false} tickLine={false} dy={6} interval={0} />
               <YAxis allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} />
               <ReTooltip formatter={(v: number) => [`${v} users`, "Accounts"]} contentStyle={tooltipStyle} />
@@ -156,7 +157,7 @@ export default function AdminDashboard() {
             {readiness.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={readiness} layout="vertical" margin={{ top: 0, right: 16, bottom: 0, left: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" horizontal={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
                   <XAxis type="number" allowDecimals={false} tick={axisTick} axisLine={false} tickLine={false} />
                   <YAxis type="category" dataKey="name" tick={axisTick} axisLine={false} tickLine={false} width={92} />
                   <ReTooltip formatter={(v: number, n: string) => [`${v} students`, n]} contentStyle={tooltipStyle} />
@@ -313,12 +314,3 @@ function formatLogTime(iso: string) {
     minute: "2-digit",
   })}`;
 }
-
-const axisTick = { fontSize: 12, fill: "#727C74" };
-const tooltipStyle = {
-  borderRadius: 10,
-  border: "1px solid #E4E9E4",
-  boxShadow: "0 4px 16px -8px rgba(32,41,35,0.16)",
-  fontSize: 13,
-  padding: "8px 12px",
-};

@@ -1,15 +1,17 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { AppSidebar, SIDEBAR_COLLAPSED, SIDEBAR_EXPANDED, SIDEBAR_OFFSET } from "./app-sidebar";
 import { AppHeader } from "./app-header";
 import { NavList, SidebarMark } from "./nav-list";
 import { useAppStore } from "@/lib/placepro/store";
+import { getThemePreference, setThemePreference, subscribeToTheme } from "@/lib/placepro/theme";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
 /* ------------------------------------------------------------------ */
@@ -19,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pinned = useAppStore((s) => s.sidebarPinned);
   const setSidebarPinned = useAppStore((s) => s.setSidebarPinned);
+  const openDialog = useAppStore((s) => s.openDialog);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   /* Tablet (below lg) starts collapsed; desktop starts pinned. */
@@ -40,7 +43,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
           </SheetHeader>
-          <NavList expanded onNavigate={() => setMobileNavOpen(false)} />
+          <NavList expanded onNavigate={() => setMobileNavOpen(false)} onDialog={(dialog) => {
+            setMobileNavOpen(false);
+            openDialog(dialog);
+          }} />
         </SheetContent>
       </Sheet>
 
@@ -114,6 +120,7 @@ function SettingsDialog() {
   const setSidebarPinned = useAppStore((s) => s.setSidebarPinned);
   const [emailDigest, setEmailDigest] = useState(true);
   const [importAlerts, setImportAlerts] = useState(true);
+  const theme = useSyncExternalStore(subscribeToTheme, getThemePreference, () => "system");
   const { toast } = useToast();
 
   return (
@@ -124,6 +131,20 @@ function SettingsDialog() {
           <DialogDescription>Workspace display and notification preferences.</DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label htmlFor="appearance-setting" className="text-[13px] font-medium">Appearance</Label>
+              <p className="text-xs text-muted-foreground">Theme for this browser.</p>
+            </div>
+            <Select value={theme} onValueChange={setThemePreference}>
+              <SelectTrigger id="appearance-setting" size="sm" className="w-28"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="system">System</SelectItem>
+                <SelectItem value="light">Light</SelectItem>
+                <SelectItem value="dark">Dark</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor="pin-setting" className="text-[13px] font-medium">Keep sidebar expanded</Label>

@@ -25,6 +25,7 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -35,6 +36,8 @@
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-primary-soft: var(--primary-soft);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -55,6 +58,7 @@
 
 :root {
   --radius: 0.5rem;
+  color-scheme: light;
 
   /* PlacePro design system — Modern Editorial Enterprise SaaS */
   --background: #f7f8f5;
@@ -68,6 +72,8 @@
   --primary-hover: #194a36;
   --primary-foreground: #ffffff;
   --primary-soft: #e8f0ea;
+  --brand: var(--primary);
+  --brand-foreground: var(--primary-foreground);
 
   --secondary: #efefe9;
   --secondary-foreground: #202923;
@@ -77,6 +83,7 @@
   --accent-foreground: #245c45;
 
   --destructive: #c65b54;
+  --destructive-foreground: #ffffff;
   --success: #25845a;
   --success-soft: #e9f3ee;
   --warning: #d99a36;
@@ -95,6 +102,7 @@
   --chart-3: #d99a36;
   --chart-4: #547fa6;
   --chart-5: #c65b54;
+  --chart-shadow: 0 4px 16px -8px rgb(32 41 35 / 16%);
 
   --sidebar: #ffffff;
   --sidebar-foreground: #202923;
@@ -104,6 +112,66 @@
   --sidebar-accent-foreground: #245c45;
   --sidebar-border: #e4e9e4;
   --sidebar-ring: #245c45;
+  --scrollbar-thumb: #cdd5cd;
+  --scrollbar-thumb-hover: #b4bfb4;
+}
+
+.dark {
+  color-scheme: dark;
+
+  --background: #101010;
+  --foreground: #ededed;
+  --card: #171717;
+  --card-foreground: var(--foreground);
+  --popover: #202020;
+  --popover-foreground: var(--foreground);
+
+  --primary: #7ac7a2;
+  --primary-hover: #91d5b5;
+  --primary-foreground: #102219;
+  --primary-soft: #1d2e25;
+  --brand: #19241e;
+  --brand-foreground: #edf4ef;
+
+  --secondary: #252525;
+  --secondary-foreground: var(--foreground);
+  --muted: #222222;
+  --muted-foreground: #a3a3a3;
+  --accent: #292929;
+  --accent-foreground: var(--foreground);
+
+  --destructive: #f0958d;
+  --destructive-foreground: #2c1513;
+  --success: #81d0a6;
+  --success-soft: #192c22;
+  --warning: #eabf76;
+  --warning-soft: #302619;
+  --danger: var(--destructive);
+  --danger-soft: #342320;
+  --info: #98bee3;
+  --info-soft: #1d2a38;
+
+  --border: #303030;
+  --input: #444444;
+  --ring: var(--primary);
+
+  --chart-1: var(--primary);
+  --chart-2: #4ba674;
+  --chart-3: var(--warning);
+  --chart-4: var(--info);
+  --chart-5: var(--danger);
+  --chart-shadow: 0 8px 24px -8px rgb(0 0 0 / 55%);
+
+  --sidebar: #151515;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--primary-soft);
+  --sidebar-accent-foreground: var(--primary);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+  --scrollbar-thumb: #404040;
+  --scrollbar-thumb-hover: #5c5c5c;
 }
 
 @layer base {
@@ -121,7 +189,7 @@
 /* Restrained custom scrollbar for dense lists / tables */
 .pp-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: #cdd5cd transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 .pp-scrollbar::-webkit-scrollbar {
   width: 6px;
@@ -131,11 +199,11 @@
   background: transparent;
 }
 .pp-scrollbar::-webkit-scrollbar-thumb {
-  background: #cdd5cd;
+  background: var(--scrollbar-thumb);
   border-radius: 999px;
 }
 .pp-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #b4bfb4;
+  background: var(--scrollbar-thumb-hover);
 }
 
 /* Numeric emphasis for KPI values and table figures */
@@ -178,6 +246,14 @@
 
 /* Focus ring consistent with product identity */
 .pp-focus:focus-visible {
-  outline: 2px solid #245c45;
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+
+.dark .recharts-tooltip-cursor {
+  stroke: var(--input);
+}
+.dark .recharts-tooltip-cursor:is(rect, path.recharts-rectangle) {
+  fill: var(--muted);
+  stroke: none;
 }

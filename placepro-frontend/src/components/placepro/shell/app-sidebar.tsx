@@ -26,7 +26,7 @@ export function AppSidebar() {
       onMouseLeave={() => setHovered(false)}
       aria-label="Sidebar navigation"
       className={cn(
-        "pp-sidebar fixed z-40 hidden rounded-[18px] border border-border bg-card md:block",
+        "pp-sidebar fixed z-40 hidden rounded-[18px] border border-sidebar-border bg-sidebar md:block",
         "shadow-[0_1px_2px_rgba(32,41,35,0.04),0_10px_28px_-14px_rgba(32,41,35,0.14)]",
       )}
       style={{

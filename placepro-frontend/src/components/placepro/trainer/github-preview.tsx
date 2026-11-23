@@ -6,7 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const colors = ["bg-muted", "bg-emerald-100", "bg-emerald-300", "bg-emerald-500", "bg-emerald-800"];
+const colors = ["bg-muted", "bg-emerald-100 dark:bg-primary/20", "bg-emerald-300 dark:bg-primary/40", "bg-emerald-500 dark:bg-primary/65", "bg-emerald-800 dark:bg-primary"];
 
 function ContributionCalendar({ calendar }: { calendar: GithubCalendar }) {
   const offset = new Date(`${calendar.from}T00:00:00Z`).getUTCDay();

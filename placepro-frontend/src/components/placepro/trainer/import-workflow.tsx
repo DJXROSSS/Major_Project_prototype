@@ -702,7 +702,7 @@ export default function ImportWorkflow() {
                     className={cn(
                       "flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold",
                       n === step
-                        ? "bg-primary text-white"
+                        ? "bg-primary text-primary-foreground"
                         : complete
                           ? "bg-primary-soft text-primary"
                           : "bg-muted text-muted-foreground",
@@ -760,7 +760,7 @@ export default function ImportWorkflow() {
                       )}
                     >
                       {selectedCard && (
-                        <span className="absolute right-3 top-3 flex size-5 items-center justify-center rounded-full bg-primary text-white">
+                        <span className="absolute right-3 top-3 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
                           <Check className="size-3" aria-hidden />
                         </span>
                       )}

@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { useAppStore } from "@/lib/placepro/store";
 import { domainScores, skillEntries } from "@/lib/placepro/skill-taxonomy";
+import { axisTick, tooltipStyle } from "@/components/placepro/shared/chart-styles";
 import { PageHeader, SectionHeading } from "@/components/placepro/shared/page-header";
 import { StatCard } from "@/components/placepro/shared/stat-card";
 import { ChartCard, EmptyState } from "@/components/placepro/shared/states";
@@ -153,7 +154,7 @@ export default function MyPerformancePage() {
           <div className="h-[280px]">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.trendData} margin={{ top: 6, right: 12, bottom: 0, left: -14 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E4E9E4" vertical={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                 <XAxis dataKey="assessment" tick={axisTick} axisLine={false} tickLine={false} dy={6} />
                 <YAxis domain={[30, 100]} tick={axisTick} axisLine={false} tickLine={false} />
                 <ReTooltip
@@ -163,16 +164,16 @@ export default function MyPerformancePage() {
                 />
                 <ReferenceLine
                   y={60}
-                  stroke="#D99A36"
+                  stroke="var(--chart-3)"
                   strokeDasharray="4 4"
-                  label={{ value: "Target", position: "insideTopRight", fontSize: 11, fill: "#D99A36" }}
+                  label={{ value: "Target", position: "insideTopRight", fontSize: 11, fill: "var(--chart-3)" }}
                 />
                 <Line
                   type="monotone"
                   dataKey="score"
-                  stroke="#245C45"
+                  stroke="var(--chart-1)"
                   strokeWidth={2.5}
-                  dot={{ r: 3.5, fill: "#245C45", strokeWidth: 0 }}
+                  dot={{ r: 3.5, fill: "var(--chart-1)", strokeWidth: 0 }}
                   activeDot={{ r: 5 }}
                   animationDuration={700}
                 />
@@ -265,13 +266,3 @@ export default function MyPerformancePage() {
     </div>
   );
 }
-
-/* shared recharts styling */
-const axisTick = { fontSize: 12, fill: "#727C74" };
-const tooltipStyle = {
-  borderRadius: 10,
-  border: "1px solid #E4E9E4",
-  boxShadow: "0 4px 16px -8px rgba(32,41,35,0.16)",
-  fontSize: 13,
-  padding: "8px 12px",
-};
